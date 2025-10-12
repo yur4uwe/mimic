@@ -43,7 +43,7 @@ windows:
 
 # Clean build artifacts
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR)/*
 
 # Phony targets
 .PHONY: all linux darwin windows clean

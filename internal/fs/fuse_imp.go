@@ -6,12 +6,17 @@ import (
 	"fmt"
 
 	"bazil.org/fuse"
+	"github.com/mimic/internal/core/webdav"
 )
 
-type fuseFS struct{}
+type fuseFS struct {
+	wc *webdav.Client
+}
 
-func New() FS {
-	return &fuseFS{}
+func New(webdavClient *webdav.Client) FS {
+	return &fuseFS{
+		wc: webdavClient,
+	}
 }
 
 func (f *fuseFS) Mount(mountpoint string) error {

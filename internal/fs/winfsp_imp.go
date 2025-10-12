@@ -5,16 +5,21 @@ package fs
 import (
 	"fmt"
 	"os"
+	"strings"
 
+	"github.com/mimic/internal/core/webdav"
 	"github.com/winfsp/cgofuse/fuse"
 )
 
 type winfspFS struct {
 	fuse.FileSystemBase
+	wc *webdav.Client
 }
 
-func New() FS {
-	return &winfspFS{}
+func New(webdavClient *webdav.Client) FS {
+	return &winfspFS{
+		wc: webdavClient,
+	}
 }
 
 func (f *winfspFS) Mount(mountpoint string) error {
@@ -24,7 +29,6 @@ func (f *winfspFS) Mount(mountpoint string) error {
 	if !host.Mount("", os.Args[1:]) {
 		return fmt.Errorf("failed to mount WinFSP filesystem")
 	}
-	fmt.Println("Mount successful")
 
 	return nil
 }
@@ -35,22 +39,41 @@ func (f *winfspFS) Unmount() error {
 }
 
 func (f *winfspFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
-	fmt.Println("Getattr called for path:", path)
-	if path == "/" {
-		stat.Mode = fuse.S_IFDIR | 0755
-		return 0
+	if path != "/" {
+		path = strings.TrimPrefix(path, "/")
 	}
-	return fuse.ENOENT
+	fmt.Println("Getattr called for path:", path)
+
+	props, err := f.wc.Props(path)
+	if err != nil {
+		fmt.Println("Error getting properties:", err)
+		return fuse.ENOENT
+	}
+
+	if props.ResourceType.Collection != nil {
+		stat.Mode = fuse.S_IFDIR | 0755
+	} else {
+		stat.Mode = fuse.S_IFREG | 0644
+		stat.Size = props.ContentLength
+	}
+
+	return 0
 }
 
 func (f *winfspFS) Readdir(path string, fill func(string, *fuse.Stat_t, int64) bool, off int64, fh uint64) int {
 	fmt.Println("Readdir called for path:", path)
-	if path == "/" {
-		fill("file1.txt", nil, 0)
-		fill("file2.txt", nil, 0)
-		return 0
+
+	items, err := f.wc.List(path)
+	if err != nil {
+		fmt.Println("Error listing directory:", err)
+		return fuse.ENOENT
 	}
-	return fuse.ENOENT
+
+	for _, item := range items {
+		fill(item, nil, 0)
+	}
+
+	return 0
 }
 
 func (f *winfspFS) Open(path string, flags int) (int, uint64) {
