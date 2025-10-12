@@ -4,11 +4,20 @@ package fs
 
 import (
 	"fmt"
-	"os"
-	"strings"
+	"path"
 
 	"github.com/mimic/internal/core/webdav"
 	"github.com/winfsp/cgofuse/fuse"
+)
+
+// POSIX-like error codes
+const (
+	ENOENT = 2  // No such file or directory
+	EIO    = 5  // I/O error
+	EACCES = 13 // Permission denied
+	EEXIST = 17 // File exists
+	EISDIR = 21 // Is a directory
+	EINVAL = 22 // Invalid argument
 )
 
 type winfspFS struct {
@@ -23,10 +32,10 @@ func New(webdavClient *webdav.Client) FS {
 }
 
 func (f *winfspFS) Mount(mountpoint string) error {
-	fmt.Println("Mounting WinFSP filesystem at", os.Args[1:])
+	fmt.Println("Mounting WinFSP filesystem at", mountpoint)
 
 	host := fuse.NewFileSystemHost(f)
-	if !host.Mount("", os.Args[1:]) {
+	if !host.Mount(mountpoint, nil) {
 		return fmt.Errorf("failed to mount WinFSP filesystem")
 	}
 
@@ -39,38 +48,90 @@ func (f *winfspFS) Unmount() error {
 }
 
 func (f *winfspFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
-	if path != "/" {
-		path = strings.TrimPrefix(path, "/")
+	if path == "/" {
+		stat.Mode = fuse.S_IFDIR | 0755
+		stat.Nlink = 2
+		stat.Size = 0
+		stat.Uid = 0
+		stat.Gid = 0
+		stat.Mtim = fuse.Now()
+		stat.Atim = fuse.Now()
+		stat.Ctim = fuse.Now()
+		stat.Blksize = 4096
+		stat.Birthtim = fuse.Now()
+		return 0
 	}
+
 	fmt.Println("Getattr called for path:", path)
 
-	props, err := f.wc.Props(path)
+	file, err := f.wc.GetProps(path)
 	if err != nil {
 		fmt.Println("Error getting properties:", err)
-		return fuse.ENOENT
+		return -ENOENT
 	}
 
-	if props.ResourceType.Collection != nil {
-		stat.Mode = fuse.S_IFDIR | 0755
+	if file.IsDir {
+		stat.Mode = fuse.S_IFDIR | 00755
+		stat.Nlink = 2
+		stat.Size = 0
 	} else {
-		stat.Mode = fuse.S_IFREG | 0644
-		stat.Size = props.ContentLength
+		stat.Mode = fuse.S_IFREG | 00644
+		stat.Nlink = 1
+		stat.Size = file.Size
 	}
+
+	stat.Uid = 0
+	stat.Gid = 0
+	stat.Mtim = fuse.NewTimespec(file.LastModified)
+	stat.Atim = fuse.NewTimespec(file.LastModified)
+	stat.Ctim = fuse.NewTimespec(file.LastModified)
+	stat.Blksize = 4096
+	stat.Birthtim = fuse.NewTimespec(file.CreationDate)
 
 	return 0
 }
 
-func (f *winfspFS) Readdir(path string, fill func(string, *fuse.Stat_t, int64) bool, off int64, fh uint64) int {
-	fmt.Println("Readdir called for path:", path)
+func (f *winfspFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int64) bool, off int64, fh uint64) int {
+	fmt.Println("Readdir called for path:", filepath)
 
-	items, err := f.wc.List(path)
+	fill(".", nil, 0)
+	fill("..", nil, 0)
+
+	items, err := f.wc.ReadDir(filepath)
 	if err != nil {
 		fmt.Println("Error listing directory:", err)
-		return fuse.ENOENT
+		return -ENOENT
 	}
 
-	for _, item := range items {
-		fill(item, nil, 0)
+	for i, file := range items {
+		name := path.Base(file.Name)
+		fmt.Printf("  Entry %d: %s (dir=%v, size=%d)\n", i, name, file.IsDir, file.Size)
+
+		stat := &fuse.Stat_t{}
+		if file.IsDir {
+			stat.Mode = fuse.S_IFDIR | 00755
+			stat.Nlink = 2
+			stat.Size = 0
+			if name == "/" {
+				name = "."
+			} else if name[len(name)-1] != '/' {
+				name += "/"
+			}
+		} else {
+			stat.Mode = fuse.S_IFREG | 00644
+			stat.Nlink = 1
+			stat.Size = file.Size
+		}
+
+		stat.Uid = 0
+		stat.Gid = 0
+		stat.Mtim = fuse.NewTimespec(file.LastModified)
+		stat.Atim = fuse.NewTimespec(file.LastModified)
+		stat.Ctim = fuse.NewTimespec(file.LastModified)
+		stat.Blksize = 4096
+		stat.Birthtim = fuse.NewTimespec(file.CreationDate)
+
+		fill(name, stat, 0)
 	}
 
 	return 0

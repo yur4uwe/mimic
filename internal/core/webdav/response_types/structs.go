@@ -1,4 +1,4 @@
-package webdav
+package restypes
 
 import "encoding/xml"
 

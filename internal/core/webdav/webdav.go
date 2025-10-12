@@ -4,37 +4,17 @@ import (
 	"encoding/xml"
 	"fmt"
 	"net/http"
+
+	restypes "github.com/mimic/internal/core/webdav/response_types"
 )
 
-// This is package for interacting with a ready WebDAV server.
-
-type Client struct {
-	Server string
-	User   string
-	Pass   string
-}
-
-func NewClient(server, user, pass string) *Client {
-	return &Client{
-		Server: server,
-		User:   user,
-		Pass:   pass,
-	}
-}
-
-func (c *Client) HealthCheck() error {
-	return nil
-}
-
-func (c *Client) List(path string) ([]string, error) {
-	fmt.Println("Listing directory at", c.Server+path)
-
+func (c *Client) ReadDir(path string) ([]FileInfo, error) {
 	req, err := http.NewRequest(PROPFIND, c.Server+path, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.SetBasicAuth(c.User, c.Pass)
-	req.Header.Set("Depth", "1")
+	req.Header.Set(DepthHeader, "1")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -47,51 +27,27 @@ func (c *Client) List(path string) ([]string, error) {
 		return nil, fmt.Errorf("failed to list files: %s", resp.Status)
 	}
 
-	var multistatus Multistatus
+	var multistatus restypes.Multistatus
 	decoder := xml.NewDecoder(resp.Body)
 	if err := decoder.Decode(&multistatus); err != nil {
 		return nil, err
 	}
 
-	var items []string
+	var items []FileInfo
 	for _, response := range multistatus.Responses {
-		items = append(items, response.Href)
+		items = append(items, ToFileInfo(response))
 	}
-
-	fmt.Println("Listed items:", items)
 
 	return items, nil
 }
 
-func (c *Client) Post(path string, data []byte) error {
-	return nil
-}
-
-func (c *Client) Get(path string) ([]byte, error) {
-	return nil, nil
-}
-
-func (c *Client) Delete(path string) error {
-	return nil
-}
-
-func (c *Client) Put(data []byte, path string) error {
-	return nil
-}
-
-func (c *Client) Move(srcPath, destPath string) error {
-	return nil
-}
-
-func (c *Client) Props(path string) (*Prop, error) {
-	fmt.Println("Propfind called for", c.Server+path)
-
+func (c *Client) GetProps(path string) (*FileInfo, error) {
 	req, err := http.NewRequest(PROPFIND, c.Server+path, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.SetBasicAuth(c.User, c.Pass)
-	req.Header.Set("Depth", "0")
+	req.Header.Set(DepthHeader, "0")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -104,13 +60,12 @@ func (c *Client) Props(path string) (*Prop, error) {
 		return nil, fmt.Errorf("failed to propfind: %s", resp.Status)
 	}
 
-	var res Multistatus
+	var xmlresp restypes.Multistatus
 	decoder := xml.NewDecoder(resp.Body)
-	if err := decoder.Decode(&res); err != nil {
-		return nil, err
+	if err := decoder.Decode(&xmlresp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %v", err)
 	}
 
-	fmt.Println("Propfind successful for", path, "with properties:", res)
-
-	return &res.Responses[0].Propstat[0].Prop, nil
+	res := ToFileInfo(xmlresp.Responses[0])
+	return &res, nil
 }

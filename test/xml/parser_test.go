@@ -2,9 +2,12 @@ package xml_test
 
 import (
 	"encoding/xml"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/mimic/internal/core/webdav"
+	restypes "github.com/mimic/internal/core/webdav/response_types"
 )
 
 const sampleXML = `<?xml version="1.0" encoding="utf-8"?>
@@ -36,14 +39,14 @@ const sampleXML = `<?xml version="1.0" encoding="utf-8"?>
 </D:multistatus>`
 
 func TestParse(t *testing.T) {
-	expected := webdav.Multistatus{
-		Responses: []webdav.Response{
+	expected := restypes.Multistatus{
+		Responses: []restypes.Response{
 			{
 				Href: "/",
-				Propstat: []webdav.Propstat{
+				Propstat: []restypes.Propstat{
 					{
-						Prop: webdav.Prop{
-							ResourceType: webdav.ResourceType{
+						Prop: restypes.Prop{
+							ResourceType: restypes.ResourceType{
 								Collection: &struct{}{},
 							},
 							CreationDate: "2025-10-12T12:29:35Z",
@@ -58,7 +61,7 @@ func TestParse(t *testing.T) {
 		},
 	}
 
-	var result webdav.Multistatus
+	var result restypes.Multistatus
 	if err := xml.Unmarshal([]byte(sampleXML), &result); err != nil {
 		t.Fatalf("Failed to parse XML: %v", err)
 	}
@@ -92,4 +95,30 @@ func TestParse(t *testing.T) {
 			}
 		}
 	}
+
+	cd, err := time.Parse(time.RFC3339, "2025-10-12T12:29:35Z")
+	if err != nil {
+		t.Fatalf("failed to parse creation date: %v", err)
+	}
+
+	md, err := time.Parse(time.RFC1123, "Sun, 12 Oct 2025 12:29:35 GMT")
+	if err != nil {
+		t.Fatalf("failed to parse last modified date: %v", err)
+	}
+
+	var asFileInfo = webdav.ToFileInfo(result.Responses[0])
+	var expectedFileInfo = webdav.FileInfo{
+		Name:         "/",
+		IsDir:        true,
+		Size:         0,
+		CreationDate: cd,
+		LastModified: md,
+		Etag:         `"1000-640f54dc19069"`,
+		ContentType:  "httpd/unix-directory",
+	}
+
+	if !reflect.DeepEqual(asFileInfo, expectedFileInfo) {
+		t.Errorf("Expected FileInfo %+v, got %+v", expectedFileInfo, asFileInfo)
+	}
+
 }

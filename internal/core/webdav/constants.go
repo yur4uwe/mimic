@@ -22,5 +22,5 @@ const (
 
 // HTTP headers used in WebDAV protocol
 const (
-	DepthH = "Depth"
+	DepthHeader = "Depth"
 )

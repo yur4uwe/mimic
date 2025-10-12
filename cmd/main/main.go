@@ -17,8 +17,6 @@ func main() {
 	filesystem := fs.New(client)
 	mountpoint := flag.Arg(0)
 
-	// Create a new WebDAV client
-
 	if err := filesystem.Mount(mountpoint); err != nil {
 		fmt.Println("Mount failed:", err)
 		os.Exit(1)
