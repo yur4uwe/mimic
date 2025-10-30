@@ -6,14 +6,14 @@ import (
 	"fmt"
 
 	"bazil.org/fuse"
-	"github.com/mimic/internal/core/webdav"
+	"github.com/studio-b12/gowebdav"
 )
 
 type fuseFS struct {
-	wc *webdav.Client
+	wc *gowebdav.Client
 }
 
-func New(webdavClient *webdav.Client) FS {
+func New(webdavClient *gowebdav.Client) FS {
 	return &fuseFS{
 		wc: webdavClient,
 	}

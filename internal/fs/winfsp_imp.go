@@ -4,9 +4,11 @@ package fs
 
 import (
 	"fmt"
-	"path"
+	"os"
 
-	"github.com/mimic/internal/core/webdav"
+	"github.com/mimic/internal/core/cache"
+	"github.com/mimic/internal/core/casters"
+	"github.com/studio-b12/gowebdav"
 	"github.com/winfsp/cgofuse/fuse"
 )
 
@@ -22,12 +24,17 @@ const (
 
 type winfspFS struct {
 	fuse.FileSystemBase
-	wc *webdav.Client
+	wc    *gowebdav.Client
+	cache *cache.NodeCache
 }
 
-func New(webdavClient *webdav.Client) FS {
+func New(webdavClient *gowebdav.Client) FS {
 	return &winfspFS{
 		wc: webdavClient,
+		cache: cache.NewNodeCache(
+			cache.DefaultTTL,
+			cache.DefaultMaxEntries,
+		),
 	}
 }
 
@@ -62,31 +69,28 @@ func (f *winfspFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 		return 0
 	}
 
+	var file os.FileInfo
+	var err error
+
+	if entry, ok := f.cache.Get(path); ok {
+		file = entry.Info
+		goto write_stat
+	}
+
 	fmt.Println("Getattr called for path:", path)
 
-	file, err := f.wc.GetProps(path)
+retry:
+	file, err = f.wc.Stat(path)
 	if err != nil {
-		fmt.Println("Error getting properties:", err)
-		return -ENOENT
+		if path[len(path)-1] != '/' {
+			path += "/"
+			goto retry
+		}
+		return -EIO
 	}
 
-	if file.IsDir {
-		stat.Mode = fuse.S_IFDIR | 00755
-		stat.Nlink = 2
-		stat.Size = 0
-	} else {
-		stat.Mode = fuse.S_IFREG | 00644
-		stat.Nlink = 1
-		stat.Size = file.Size
-	}
-
-	stat.Uid = 0
-	stat.Gid = 0
-	stat.Mtim = fuse.NewTimespec(file.LastModified)
-	stat.Atim = fuse.NewTimespec(file.LastModified)
-	stat.Ctim = fuse.NewTimespec(file.LastModified)
-	stat.Blksize = 4096
-	stat.Birthtim = fuse.NewTimespec(file.CreationDate)
+write_stat:
+	*stat = *casters.FileInfoCast(file)
 
 	return 0
 }
@@ -97,39 +101,24 @@ func (f *winfspFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int6
 	fill(".", nil, 0)
 	fill("..", nil, 0)
 
-	items, err := f.wc.ReadDir(filepath)
-	if err != nil {
-		fmt.Println("Error listing directory:", err)
-		return -ENOENT
+	var entries []os.FileInfo
+	if entry, ok := f.cache.Get(filepath); ok && entry.IsDir && entry.Children != nil {
+		entries = entry.Children
+	} else {
+		items, err := f.wc.ReadDir(filepath)
+		if err != nil {
+			return -ENOENT
+		}
+		entries = items
 	}
 
-	for i, file := range items {
-		name := path.Base(file.Name)
-		fmt.Printf("  Entry %d: %s (dir=%v, size=%d)\n", i, name, file.IsDir, file.Size)
+	for i, file := range entries {
+		name := file.Name()
+		fmt.Printf("  Entry %d: %s (dir=%v, size=%d)\n", i, name, file.IsDir(), file.Size())
 
-		stat := &fuse.Stat_t{}
-		if file.IsDir {
-			stat.Mode = fuse.S_IFDIR | 00755
-			stat.Nlink = 2
-			stat.Size = 0
-			if name == "/" {
-				name = "."
-			} else if name[len(name)-1] != '/' {
-				name += "/"
-			}
-		} else {
-			stat.Mode = fuse.S_IFREG | 00644
-			stat.Nlink = 1
-			stat.Size = file.Size
-		}
+		stat := casters.FileInfoCast(file)
 
-		stat.Uid = 0
-		stat.Gid = 0
-		stat.Mtim = fuse.NewTimespec(file.LastModified)
-		stat.Atim = fuse.NewTimespec(file.LastModified)
-		stat.Ctim = fuse.NewTimespec(file.LastModified)
-		stat.Blksize = 4096
-		stat.Birthtim = fuse.NewTimespec(file.CreationDate)
+		f.cache.Set(gowebdav.Join(filepath, name), f.cache.NewEntry(file))
 
 		fill(name, stat, 0)
 	}
