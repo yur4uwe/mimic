@@ -1,0 +1,3 @@
+# enforce LF for Makefile and normalize text files
+Makefile text eol=lf
+* text=auto

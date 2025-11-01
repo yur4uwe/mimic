@@ -7,23 +7,23 @@ UNAME_S := $(shell uname -s)
 
 # Set GOOS and GOARCH based on the detected OS
 ifeq ($(UNAME_S), Linux)
-	GOOS := linux
-	GOARCH := amd64
-	OUTPUT := $(BUILD_DIR)/$(BINARY_NAME)_linux
+GOOS := linux
+GOARCH := amd64
+OUTPUT := $(BUILD_DIR)/$(BINARY_NAME)_linux
 else ifeq ($(UNAME_S), Darwin)
-	GOOS := darwin
-	GOARCH := amd64
-	OUTPUT := $(BUILD_DIR)/$(BINARY_NAME)_darwin
-else ifneq (,$(findstring MINGW64_NT,$(UNAME_S)))
-	GOOS := windows
-	GOARCH := amd64
-	OUTPUT := $(BUILD_DIR)/$(BINARY_NAME)_windows.exe
+GOOS := darwin
+GOARCH := amd64
+OUTPUT := $(BUILD_DIR)/$(BINARY_NAME)_darwin
+else ifneq (,$(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)))
+GOOS := windows
+GOARCH := amd64
+OUTPUT := $(BUILD_DIR)/$(BINARY_NAME)_windows.exe
 else
-	$(error Unsupported OS: $(UNAME_S))
+$(error Unsupported OS: $(UNAME_S))
 endif
 
 # Default target: build for the current platform
-all: $(OUTPUT)
+# all: $(OUTPUT)
 
 # Build for the current platform
 $(OUTPUT):
