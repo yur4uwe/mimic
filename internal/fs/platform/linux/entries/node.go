@@ -5,21 +5,25 @@ package entries
 import (
 	"context"
 	"fmt"
+	"hash/crc32"
+	"log"
 	"os"
 	"path"
 	"strings"
 	"syscall"
+	"time"
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"github.com/mimic/internal/core/casters"
+	"github.com/mimic/internal/core/checks"
 	"github.com/studio-b12/gowebdav"
 )
 
 // Node represents a file or directory backed by WebDAV
 type Node struct {
 	wc   *gowebdav.Client
-	path string // absolute path as seen by WebDAV client (leading '/')
+	path string
 }
 
 func NewNode(wc *gowebdav.Client, path string) *Node {
@@ -29,9 +33,16 @@ func NewNode(wc *gowebdav.Client, path string) *Node {
 	}
 }
 
-// Attr implements fs.Node
 func (n *Node) Attr(ctx context.Context, a *fuse.Attr) error {
-	fmt.Println("Attr called for path:", n.path)
+	log.Println("Attr called for path:", n.path)
+
+	if n.path == "/" {
+		a.Mode = os.ModeDir | 0o755
+		a.Size = 0
+		a.Valid = time.Minute
+
+		return nil
+	}
 
 	fi, err := n.wc.Stat(n.path)
 	if err != nil {
@@ -40,19 +51,21 @@ func (n *Node) Attr(ctx context.Context, a *fuse.Attr) error {
 		}
 		return err
 	}
+
 	attr := casters.FileInfoCast(fi)
+
+	attr.Inode = uint64(crc32.ChecksumIEEE([]byte(n.path)) + 1)
+
 	*a = *attr
 	return nil
 }
 
-// Lookup implements fs.NodeStringLookuper
 func (n *Node) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	childPath := path.Join(n.path, name)
-
 	fmt.Println("Lookup called for path:", childPath)
 
 retry:
-	_, err := n.wc.Stat(childPath)
+	fi, err := n.wc.Stat(childPath)
 	if err != nil {
 		if !strings.HasSuffix(childPath, "/") {
 			childPath += "/"
@@ -63,7 +76,16 @@ retry:
 			return nil, syscall.Errno(syscall.ENOENT)
 		}
 	}
-	return &Node{wc: n.wc, path: childPath}, nil
+
+	if checks.IsNilInterface(fi) {
+		return nil, syscall.Errno(syscall.ENOENT)
+	}
+
+	if fi.IsDir() {
+		return &Node{wc: n.wc, path: childPath}, nil
+	}
+
+	return &File{path: childPath, wc: n.wc}, nil
 }
 
 func (n *Node) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
@@ -73,41 +95,33 @@ func (n *Node) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var entries []fuse.Dirent
 	for _, fi := range infos {
+		if fi == nil {
+			continue
+		}
+		name := fi.Name()
+
+		if strings.ContainsAny(name, " \t\n\r") {
+			name = path.Base(name)
+		}
+
+		childPath := path.Join(n.path, name)
+
 		var t fuse.DirentType
 		if fi.IsDir() {
 			t = fuse.DT_Dir
 		} else {
 			t = fuse.DT_File
 		}
+
 		entries = append(entries, fuse.Dirent{
-			Name: fi.Name(),
-			Type: t,
+			Inode: uint64(crc32.ChecksumIEEE([]byte(childPath)) + 1),
+			Name:  fi.Name(),
+			Type:  t,
 		})
 	}
+
 	return entries, nil
-}
-
-// File Node behavior: implement ReadAll for convenience
-type fileHandle struct {
-	path string
-	wc   *gowebdav.Client
-}
-
-func (n *Node) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
-	// for directories, bazil will not call Open; this is for files
-	return &fileHandle{path: n.path, wc: n.wc}, nil
-}
-
-func (fh *fileHandle) ReadAll(ctx context.Context) ([]byte, error) {
-	// gowebdav.Client has a Read method that returns []byte
-	data, err := fh.wc.Read(fh.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, syscall.Errno(syscall.ENOENT)
-		}
-		return nil, err
-	}
-	return data, nil
 }

@@ -17,14 +17,12 @@ type FuseFS struct {
 	Wc *gowebdav.Client
 }
 
-func New(webdavClient *gowebdav.Client) fs.FS {
-	return &FuseFS{
-		Wc: webdavClient,
-	}
-}
-
 func (f *FuseFS) Mount(mountpoint string) error {
-	c, err := fuse.Mount(mountpoint)
+	c, err := fuse.Mount(
+		mountpoint,
+		fuse.FSName("mimic"),
+		fuse.Subtype("mimicfs"),
+	)
 	if err != nil {
 		return fmt.Errorf("fuse mount failed: %w", err)
 	}
@@ -53,5 +51,6 @@ func (f *FuseFS) Unmount() error {
 }
 
 func (f *FuseFS) Root() (fs.Node, error) {
+	log.Println("Root called")
 	return entries.NewNode(f.Wc, "/"), nil
 }
