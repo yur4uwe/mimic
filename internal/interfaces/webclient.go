@@ -19,10 +19,10 @@ type WebClient interface {
 	ReadStreamRange(name string, offset, length int64) (io.ReadCloser, error) // ranged streaming read
 
 	// Write / create / remove
-	Write(name string, data []byte) error  // write/overwrite with byte slice
-	Create(name string, data []byte) error // create new file with data (can alias Write)
-	Remove(name string) error              // delete a file
-	Mkdir(name string) error               // create directory
-	Rmdir(name string) error               // remove directory
-	Rename(oldname, newname string) error  // rename/move
+	Write(name string, data []byte) error      // write/overwrite with byte slice
+	Create(name string) error                  // create new file with data (can alias Write)
+	Remove(name string) error                  // delete a file
+	Mkdir(name string, mode os.FileMode) error // create directory
+	Rmdir(name string) error                   // remove directory
+	Rename(oldname, newname string) error      // rename/move
 }

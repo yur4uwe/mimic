@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.com/mimic/internal/core/casters"
 	"github.com/mimic/internal/interfaces"
@@ -30,7 +31,7 @@ const (
 
 type winfspFS struct {
 	fuse.FileSystemBase
-	clent      interfaces.WebClient
+	client     interfaces.WebClient
 	handles    sync.Map // map[uint64]*FileHandle
 	nextHandle uint64
 }
@@ -43,8 +44,26 @@ type openedFile struct {
 
 func New(webdavClient interfaces.WebClient) FS {
 	return &winfspFS{
-		clent: webdavClient,
+		client: webdavClient,
 	}
+}
+
+func (f *winfspFS) NewHandle(path string, flags int, size int64) uint64 {
+	file_handle := atomic.AddUint64(&f.nextHandle, 1)
+	f.handles.Store(file_handle, &openedFile{
+		path:  path,
+		flags: flags,
+		size:  size,
+	})
+	return file_handle
+}
+
+func (f *winfspFS) GetHandle(handle uint64) (*openedFile, bool) {
+	file, ok := f.handles.Load(handle)
+	if !ok {
+		return nil, false
+	}
+	return file.(*openedFile), true
 }
 
 func (f *winfspFS) Mount(mountpoint string) error {
@@ -78,18 +97,10 @@ func (f *winfspFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 		return 0
 	}
 
-	var file os.FileInfo
-	var err error
-
 	fmt.Println("Getattr called for path:", path)
 
-retry:
-	file, err = f.clent.Stat(path)
+	file, err := f.client.Stat(path)
 	if err != nil {
-		if path[len(path)-1] != '/' {
-			path += "/"
-			goto retry
-		}
 		return -EIO
 	}
 
@@ -104,15 +115,12 @@ func (f *winfspFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int6
 	fill(".", nil, 0)
 	fill("..", nil, 0)
 
-	var entries []os.FileInfo
-
-	items, err := f.clent.ReadDir(filepath)
+	items, err := f.client.ReadDir(filepath)
 	if err != nil {
 		return -ENOENT
 	}
-	entries = items
 
-	for i, file := range entries {
+	for i, file := range items {
 		name := file.Name()
 		fmt.Printf("  Entry %d: %s (dir=%v, size=%d)\n", i, name, file.IsDir(), file.Size())
 
@@ -125,18 +133,37 @@ func (f *winfspFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int6
 }
 
 func (f *winfspFS) Open(path string, flags int) (int, uint64) {
-	fmt.Println("Open called for path:", path)
 
-	f.clent.Stat(path)
+	fi, err := f.client.Stat(path)
+	if err != nil {
+		return -EIO, 0
+	}
 
-	return 0, 0
+	if fi.IsDir() && (flags&fuse.O_WRONLY != 0 || flags&fuse.O_RDWR != 0) {
+		return -EISDIR, 0
+	}
+
+	handle := f.NewHandle(path, flags, fi.Size())
+
+	fmt.Println("Open called for path:", path, "with flags:", flags, "handle:", handle)
+
+	return 0, handle
 }
 
 func (f *winfspFS) Read(path string, buffer []byte, offset int64, file_handle uint64) int {
 	fmt.Println("Read called for path:", path)
 
+	file, ok := f.GetHandle(file_handle)
+	if !ok {
+		return -EIO
+	}
+
+	if offset >= file.size {
+		return 0 // EOF
+	}
+
 	toRead := len(buffer)
-	rc, err := f.clent.ReadStreamRange(path, offset, int64(toRead))
+	rc, err := f.client.ReadStreamRange(file.path, offset, int64(toRead))
 	if err != nil {
 		return -EIO
 	}
@@ -155,13 +182,35 @@ func (f *winfspFS) Read(path string, buffer []byte, offset int64, file_handle ui
 func (f *winfspFS) Write(path string, buffer []byte, offset int64, file_handle uint64) int {
 	fmt.Println("Write called for path:", path)
 	fmt.Printf("Data written: %s\n", string(buffer))
+
+	file, ok := f.GetHandle(file_handle)
+	if !ok {
+		return -EIO
+	}
+
+	if offset >= file.size {
+		return 0 // EOF
+	}
+
+	err := f.client.Write(file.path, buffer)
+	if err != nil {
+		return -EIO
+	}
+
 	return len(buffer)
 }
 
-func (f *winfspFS) Create(string, int, uint32) (int, uint64) {
-	fmt.Println("Create called")
-	return 0, 0
+func (f *winfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
+	fmt.Println("Create called for path:", path, "with mode:", mode, "and flags:", flags)
+
+	err := f.client.Create(path)
+	if err != nil {
+		return -EIO, 0
+	}
+
+	return 0, f.NewHandle(path, flags, 0)
 }
+
 func (f *winfspFS) Unlink(path string) int {
 	fmt.Println("Unlink called for path:", path)
 	return 0
@@ -169,16 +218,34 @@ func (f *winfspFS) Unlink(path string) int {
 
 func (f *winfspFS) Mkdir(path string, mode uint32) int {
 	fmt.Println("Mkdir called for path:", path)
+
+	err := f.client.Mkdir(path, os.FileMode(mode))
+	if err != nil {
+		return -EIO
+	}
+
 	return 0
 }
 
 func (f *winfspFS) Rmdir(path string) int {
 	fmt.Println("Rmdir called for path:", path)
+
+	err := f.client.Rmdir(path)
+	if err != nil {
+		return -EIO
+	}
+
 	return 0
 }
 
 func (f *winfspFS) Rename(oldPath string, newPath string) int {
 	fmt.Println("Rename called from", oldPath, "to", newPath)
+
+	err := f.client.Rename(oldPath, newPath)
+	if err != nil {
+		return -EIO
+	}
+
 	return 0
 }
 
