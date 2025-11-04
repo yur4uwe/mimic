@@ -4,11 +4,12 @@ package fs
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"sync"
 
-	"github.com/mimic/internal/core/cache"
 	"github.com/mimic/internal/core/casters"
-	"github.com/studio-b12/gowebdav"
+	"github.com/mimic/internal/interfaces"
 	"github.com/winfsp/cgofuse/fuse"
 )
 
@@ -22,19 +23,27 @@ const (
 	EINVAL = 22 // Invalid argument
 )
 
+const (
+	DEFAULT_BLOCK_SIZE = 4096
+	READ_LEN           = 1024 * 1024
+)
+
 type winfspFS struct {
 	fuse.FileSystemBase
-	wc    *gowebdav.Client
-	cache *cache.NodeCache
+	clent      interfaces.WebClient
+	handles    sync.Map // map[uint64]*FileHandle
+	nextHandle uint64
 }
 
-func New(webdavClient *gowebdav.Client) FS {
+type openedFile struct {
+	path  string
+	flags int
+	size  int64
+}
+
+func New(webdavClient interfaces.WebClient) FS {
 	return &winfspFS{
-		wc: webdavClient,
-		cache: cache.NewNodeCache(
-			cache.DefaultTTL,
-			cache.DefaultMaxEntries,
-		),
+		clent: webdavClient,
 	}
 }
 
@@ -72,15 +81,10 @@ func (f *winfspFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 	var file os.FileInfo
 	var err error
 
-	if entry, ok := f.cache.Get(path); ok {
-		file = entry.Info
-		goto write_stat
-	}
-
 	fmt.Println("Getattr called for path:", path)
 
 retry:
-	file, err = f.wc.Stat(path)
+	file, err = f.clent.Stat(path)
 	if err != nil {
 		if path[len(path)-1] != '/' {
 			path += "/"
@@ -89,7 +93,6 @@ retry:
 		return -EIO
 	}
 
-write_stat:
 	*stat = *casters.FileInfoCast(file)
 
 	return 0
@@ -102,23 +105,18 @@ func (f *winfspFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int6
 	fill("..", nil, 0)
 
 	var entries []os.FileInfo
-	if entry, ok := f.cache.Get(filepath); ok && entry.IsDir && entry.Children != nil {
-		entries = entry.Children
-	} else {
-		items, err := f.wc.ReadDir(filepath)
-		if err != nil {
-			return -ENOENT
-		}
-		entries = items
+
+	items, err := f.clent.ReadDir(filepath)
+	if err != nil {
+		return -ENOENT
 	}
+	entries = items
 
 	for i, file := range entries {
 		name := file.Name()
 		fmt.Printf("  Entry %d: %s (dir=%v, size=%d)\n", i, name, file.IsDir(), file.Size())
 
 		stat := casters.FileInfoCast(file)
-
-		f.cache.Set(gowebdav.Join(filepath, name), f.cache.NewEntry(file))
 
 		fill(name, stat, 0)
 	}
@@ -128,20 +126,36 @@ func (f *winfspFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int6
 
 func (f *winfspFS) Open(path string, flags int) (int, uint64) {
 	fmt.Println("Open called for path:", path)
+
+	f.clent.Stat(path)
+
 	return 0, 0
 }
 
-func (f *winfspFS) Read(path string, buff []byte, ofst int64, fh uint64) int {
+func (f *winfspFS) Read(path string, buffer []byte, offset int64, file_handle uint64) int {
 	fmt.Println("Read called for path:", path)
-	data := "Hello, World!"
-	copy(buff, data)
-	return len(data)
+
+	toRead := len(buffer)
+	rc, err := f.clent.ReadStreamRange(path, offset, int64(toRead))
+	if err != nil {
+		return -EIO
+	}
+	defer rc.Close()
+
+	n, err := io.ReadFull(rc, buffer)
+	if err == io.ErrUnexpectedEOF || err == io.EOF {
+		return n
+	} else if err != nil {
+		return -EIO
+	}
+
+	return n
 }
 
-func (f *winfspFS) Write(path string, buff []byte, ofst int64, fh uint64) int {
+func (f *winfspFS) Write(path string, buffer []byte, offset int64, file_handle uint64) int {
 	fmt.Println("Write called for path:", path)
-	fmt.Printf("Data written: %s\n", string(buff))
-	return len(buff)
+	fmt.Printf("Data written: %s\n", string(buffer))
+	return len(buffer)
 }
 
 func (f *winfspFS) Create(string, int, uint32) (int, uint64) {
@@ -165,5 +179,11 @@ func (f *winfspFS) Rmdir(path string) int {
 
 func (f *winfspFS) Rename(oldPath string, newPath string) int {
 	fmt.Println("Rename called from", oldPath, "to", newPath)
+	return 0
+}
+
+func (f *winfspFS) Release(path string, file_handle uint64) int {
+	fmt.Println("Release called for path:", path, "handle:", file_handle)
+	f.handles.Delete(file_handle)
 	return 0
 }

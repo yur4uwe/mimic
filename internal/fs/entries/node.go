@@ -12,25 +12,25 @@ import (
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"github.com/mimic/internal/core/casters"
-	"github.com/studio-b12/gowebdav"
+	"github.com/mimic/internal/interfaces"
 )
 
 // Node represents a file or directory backed by WebDAV
 type Node struct {
-	wc   *gowebdav.Client
-	path string // absolute path as seen by WebDAV client (leading '/')
+	client interfaces.WebClient
+	path   string // absolute path as seen by WebDAV client (leading '/')
 }
 
-func NewNode(wc *gowebdav.Client, path string) *Node {
+func NewNode(client interfaces.WebClient, path string) *Node {
 	return &Node{
-		wc:   wc,
-		path: path,
+		client: client,
+		path:   path,
 	}
 }
 
 // Attr implements fs.Node
 func (n *Node) Attr(ctx context.Context, a *fuse.Attr) error {
-	fi, err := n.wc.Stat(n.path)
+	fi, err := n.client.Stat(n.path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return syscall.Errno(syscall.ENOENT)
@@ -48,7 +48,7 @@ func (n *Node) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	// ensure path form matches WebDAV expectations (keep trailing slash only when dir)
 	// Stat will tell us if it exists
 retry:
-	_, err := n.wc.Stat(childPath)
+	_, err := n.client.Stat(childPath)
 	if err != nil {
 		// try with trailing slash if not found
 		if !strings.HasSuffix(childPath, "/") {
@@ -60,12 +60,12 @@ retry:
 			return nil, syscall.Errno(syscall.ENOENT)
 		}
 	}
-	return &Node{wc: n.wc, path: childPath}, nil
+	return &Node{client: n.client, path: childPath}, nil
 }
 
 // ReadDirAll implements fs.HandleReadDirAller / fs.NodeReaddirer
 func (n *Node) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
-	infos, err := n.wc.ReadDir(n.path)
+	infos, err := n.client.ReadDir(n.path)
 	if err != nil {
 		return nil, err
 	}
@@ -87,18 +87,18 @@ func (n *Node) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 
 // File Node behavior: implement ReadAll for convenience
 type fileHandle struct {
-	path string
-	wc   *gowebdav.Client
+	path   string
+	client interfaces.WebClient
 }
 
 func (n *Node) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
 	// for directories, bazil will not call Open; this is for files
-	return &fileHandle{path: n.path, wc: n.wc}, nil
+	return &fileHandle{path: n.path, client: n.client}, nil
 }
 
 func (fh *fileHandle) ReadAll(ctx context.Context) ([]byte, error) {
 	// gowebdav.Client has a Read method that returns []byte
-	data, err := fh.wc.Read(fh.path)
+	data, err := fh.client.Read(fh.path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fuse.ENOENT

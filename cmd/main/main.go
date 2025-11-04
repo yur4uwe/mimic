@@ -4,7 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/mimic/internal/core/wrappers"
 	"github.com/mimic/internal/fs"
 	"github.com/studio-b12/gowebdav"
 )
@@ -25,7 +27,9 @@ func main() {
 		panic("webdav client: couldn't connect to the server")
 	}
 
-	filesystem := fs.New(client)
+	webdavClient := wrappers.NewWebdavClient(client, time.Minute, 1000)
+
+	filesystem := fs.New(webdavClient)
 	mountpoint := flag.Arg(0)
 
 	if err := filesystem.Mount(mountpoint); err != nil {
