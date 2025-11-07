@@ -10,12 +10,12 @@ import (
 
 	"bazil.org/fuse"
 	"github.com/mimic/internal/core/casters"
-	"github.com/studio-b12/gowebdav"
+	"github.com/mimic/internal/interfaces"
 )
 
 type File struct {
 	path string
-	wc   *gowebdav.Client
+	wc   interfaces.WebClient
 }
 
 func (f *File) Attr(ctx context.Context, a *fuse.Attr) error {

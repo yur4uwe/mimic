@@ -17,16 +17,16 @@ import (
 	"bazil.org/fuse/fs"
 	"github.com/mimic/internal/core/casters"
 	"github.com/mimic/internal/core/checks"
-	"github.com/studio-b12/gowebdav"
+	"github.com/mimic/internal/interfaces"
 )
 
 // Node represents a file or directory backed by WebDAV
 type Node struct {
-	wc   *gowebdav.Client
+	wc   interfaces.WebClient
 	path string
 }
 
-func NewNode(wc *gowebdav.Client, path string) *Node {
+func NewNode(wc interfaces.WebClient, path string) *Node {
 	return &Node{
 		wc:   wc,
 		path: path,
@@ -64,17 +64,9 @@ func (n *Node) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	childPath := path.Join(n.path, name)
 	fmt.Println("Lookup called for path:", childPath)
 
-retry:
 	fi, err := n.wc.Stat(childPath)
 	if err != nil {
-		if !strings.HasSuffix(childPath, "/") {
-			childPath += "/"
-			goto retry
-		}
-
-		if os.IsNotExist(err) {
-			return nil, syscall.Errno(syscall.ENOENT)
-		}
+		return nil, syscall.Errno(syscall.ENOENT)
 	}
 
 	if checks.IsNilInterface(fi) {

@@ -10,11 +10,17 @@ import (
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"github.com/mimic/internal/fs/platform/linux/entries"
-	"github.com/studio-b12/gowebdav"
+	"github.com/mimic/internal/interfaces"
 )
 
 type FuseFS struct {
-	Wc *gowebdav.Client
+	client interfaces.WebClient
+}
+
+func New(wc interfaces.WebClient) *FuseFS {
+	return &FuseFS{
+		client: wc,
+	}
 }
 
 func (f *FuseFS) Mount(mountpoint string) error {
@@ -52,5 +58,5 @@ func (f *FuseFS) Unmount() error {
 
 func (f *FuseFS) Root() (fs.Node, error) {
 	log.Println("Root called")
-	return entries.NewNode(f.Wc, "/"), nil
+	return entries.NewNode(f.client, "/"), nil
 }
