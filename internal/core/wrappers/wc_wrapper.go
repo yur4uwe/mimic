@@ -38,7 +38,7 @@ func (w *WebdavClient) Stat(name string) (os.FileInfo, error) {
 retry:
 	stat, err := w.client.Stat(name)
 	if err != nil {
-		if !strings.HasSuffix(name, "/") && strings.Contains(err.Error(), "301") {
+		if !strings.HasSuffix(name, "/") && strings.Contains(err.Error(), "200") {
 			name += "/"
 			goto retry
 		}

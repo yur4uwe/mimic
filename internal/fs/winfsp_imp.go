@@ -84,11 +84,11 @@ func (f *winfspFS) Unmount() error {
 
 func (f *winfspFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 	if path == "/" {
-		stat.Mode = fuse.S_IFDIR | 0755
+		stat.Mode = fuse.S_IFDIR | 00777
 		stat.Nlink = 2
 		stat.Size = 0
-		stat.Uid = 0
-		stat.Gid = 0
+		stat.Uid = 1000
+		stat.Gid = 1000
 		stat.Mtim = fuse.Now()
 		stat.Atim = fuse.Now()
 		stat.Ctim = fuse.Now()

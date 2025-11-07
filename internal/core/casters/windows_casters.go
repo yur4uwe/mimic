@@ -21,11 +21,11 @@ func FileInfoCast(f os.FileInfo) *fuse.Stat_t {
 	stat := &fuse.Stat_t{}
 
 	if f.IsDir() {
-		stat.Mode = fuse.S_IFDIR | 00777
+		stat.Mode = fuse.S_IFDIR | 00755
 		stat.Nlink = 2
 		stat.Size = 0
 	} else {
-		stat.Mode = fuse.S_IFREG | 00666
+		stat.Mode = fuse.S_IFREG | 00644
 		stat.Nlink = 1
 		stat.Size = f.Size()
 	}
