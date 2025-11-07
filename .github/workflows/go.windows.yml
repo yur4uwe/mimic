@@ -7,11 +7,45 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install WinFsp and MinGW (for cgo)
+        shell: pwsh
+        run: |
+          choco install winfsp -y
+          choco install mingw -y
+          refreshenv
+
+          $inc = 'C:\PROGRA~2\WinFsp\inc\fuse'
+          $lib = 'C:\PROGRA~2\WinFsp\lib'
+
+          if (-not (Test-Path (Join-Path $inc 'fuse_common.h'))) {
+            Write-Host "Missing WinFsp header: fuse_common.h in $inc"
+            exit 1
+          } else {
+            Write-Host "Found WinFsp header: fuse_common.h"
+          }
+
+          if (-not (Test-Path (Join-Path $inc 'fuse.h'))) {
+            Write-Host "Missing WinFsp header: fuse.h in $inc"
+            exit 1
+          } else {
+            Write-Host "Found WinFsp header: fuse.h"
+          }
+
+          if (-not (Test-Path (Join-Path $lib 'winfsp-x64.lib'))) {
+            Write-Host "Missing WinFsp library: winfsp-x64.lib in $lib"
+            exit 1
+          } else {
+            Write-Host "Found WinFsp library: winfsp-x64.lib"
+          }
+
+          Add-Content -Path $env:GITHUB_ENV -Value "WINFSP_INCLUDE=$inc"
+          Add-Content -Path $env:GITHUB_ENV -Value "WINFSP_LIB=$lib"
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -19,13 +53,23 @@ jobs:
           go-version: '1.23.4'
 
       - name: Download modules
-        shell: bash
+        shell: pwsh
         run: go mod download
 
       - name: Build
-        shell: bash
-        run: go build -v ./...
+        shell: pwsh
+        env:
+          CGO_ENABLED: '1'
+          CC: x86_64-w64-mingw32-gcc
+          CGO_CFLAGS: -I${{ env.WINFSP_INCLUDE }}
+          CGO_LDFLAGS: -L${{ env.WINFSP_LIB }} -lwinfsp-x64
+        run: make windows
 
       - name: Test
-        shell: bash
+        shell: pwsh
+        env:
+          CGO_ENABLED: '1'
+          CC: x86_64-w64-mingw32-gcc
+          CGO_CFLAGS: -I${{ env.WINFSP_INCLUDE }}
+          CGO_LDFLAGS: -L${{ env.WINFSP_LIB }} -lwinfsp-x64
         run: go test -v ./...

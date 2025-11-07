@@ -4,30 +4,30 @@ package casters
 
 import (
 	"os"
+	"time"
 
 	"bazil.org/fuse"
 )
 
 func FileInfoCast(f os.FileInfo) *fuse.Attr {
 	attr := &fuse.Attr{
-		Mode:  f.Mode(),         // base mode
-		Size:  uint64(f.Size()), // size in bytes
-		Uid:   uint32(0),
-		Gid:   uint32(0),
+		Valid: time.Minute,
+		Mode:  f.Mode(),
+		Size:  uint64(f.Size()),
+		Uid:   uint32(1000),
+		Gid:   uint32(1000),
 		Atime: f.ModTime(),
 		Mtime: f.ModTime(),
 		Ctime: f.ModTime(),
 	}
 
 	if f.IsDir() {
-		attr.Mode |= os.ModeDir | 0755
+		attr.Mode = os.ModeDir | 0o755
 		attr.Nlink = 2
 		attr.Size = 0
 	} else {
-		// regular file defaults
-		attr.Mode |= 0644
+		attr.Mode = os.FileMode(0o644)
 		attr.Nlink = 1
-		// compute blocks using 4096 block size
 		if f.Size() > 0 {
 			attr.Blocks = uint64((f.Size() + 4095) / 4096)
 		}

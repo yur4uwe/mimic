@@ -1,27 +1,18 @@
-//go:build windows
-
-package fs
+package win
 
 import (
 	"fmt"
 	"io"
 	"os"
-	"sync"
 	"sync/atomic"
 
 	"github.com/mimic/internal/core/casters"
-	"github.com/mimic/internal/interfaces"
 	"github.com/winfsp/cgofuse/fuse"
 )
 
-// POSIX-like error codes
 const (
-	ENOENT = 2  // No such file or directory
-	EIO    = 5  // I/O error
-	EACCES = 13 // Permission denied
-	EEXIST = 17 // File exists
-	EISDIR = 21 // Is a directory
-	EINVAL = 22 // Invalid argument
+	ENOENT = fuse.ENOENT
+	EIO    = fuse.EIO
 )
 
 const (
@@ -29,26 +20,13 @@ const (
 	READ_LEN           = 1024 * 1024
 )
 
-type winfspFS struct {
-	fuse.FileSystemBase
-	client     interfaces.WebClient
-	handles    sync.Map // map[uint64]*FileHandle
-	nextHandle uint64
-}
-
 type openedFile struct {
 	path  string
 	flags int
 	size  int64
 }
 
-func New(webdavClient interfaces.WebClient) FS {
-	return &winfspFS{
-		client: webdavClient,
-	}
-}
-
-func (f *winfspFS) NewHandle(path string, flags int, size int64) uint64 {
+func (f *WinfspFS) NewHandle(path string, flags int, size int64) uint64 {
 	file_handle := atomic.AddUint64(&f.nextHandle, 1)
 	f.handles.Store(file_handle, &openedFile{
 		path:  path,
@@ -58,7 +36,7 @@ func (f *winfspFS) NewHandle(path string, flags int, size int64) uint64 {
 	return file_handle
 }
 
-func (f *winfspFS) GetHandle(handle uint64) (*openedFile, bool) {
+func (f *WinfspFS) GetHandle(handle uint64) (*openedFile, bool) {
 	file, ok := f.handles.Load(handle)
 	if !ok {
 		return nil, false
@@ -66,23 +44,7 @@ func (f *winfspFS) GetHandle(handle uint64) (*openedFile, bool) {
 	return file.(*openedFile), true
 }
 
-func (f *winfspFS) Mount(mountpoint string) error {
-	fmt.Println("Mounting WinFSP filesystem at", mountpoint)
-
-	host := fuse.NewFileSystemHost(f)
-	if !host.Mount(mountpoint, nil) {
-		return fmt.Errorf("failed to mount WinFSP filesystem")
-	}
-
-	return nil
-}
-
-func (f *winfspFS) Unmount() error {
-	fmt.Println("Unmounting WinFSP filesystem")
-	return nil
-}
-
-func (f *winfspFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
+func (f *WinfspFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 	if path == "/" {
 		stat.Mode = fuse.S_IFDIR | 00777
 		stat.Nlink = 2
@@ -109,7 +71,7 @@ func (f *winfspFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 	return 0
 }
 
-func (f *winfspFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int64) bool, off int64, fh uint64) int {
+func (f *WinfspFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int64) bool, off int64, fh uint64) int {
 	fmt.Println("Readdir called for path:", filepath)
 
 	fill(".", nil, 0)
@@ -132,7 +94,7 @@ func (f *winfspFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int6
 	return 0
 }
 
-func (f *winfspFS) Open(path string, flags int) (int, uint64) {
+func (f *WinfspFS) Open(path string, flags int) (int, uint64) {
 
 	fi, err := f.client.Stat(path)
 	if err != nil {
@@ -140,6 +102,7 @@ func (f *winfspFS) Open(path string, flags int) (int, uint64) {
 	}
 
 	if fi.IsDir() && (flags&fuse.O_WRONLY != 0 || flags&fuse.O_RDWR != 0) {
+		EISDIR := 1
 		return -EISDIR, 0
 	}
 
@@ -150,7 +113,7 @@ func (f *winfspFS) Open(path string, flags int) (int, uint64) {
 	return 0, handle
 }
 
-func (f *winfspFS) Read(path string, buffer []byte, offset int64, file_handle uint64) int {
+func (f *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle uint64) int {
 	fmt.Println("Read called for path:", path)
 
 	file, ok := f.GetHandle(file_handle)
@@ -179,7 +142,7 @@ func (f *winfspFS) Read(path string, buffer []byte, offset int64, file_handle ui
 	return n
 }
 
-func (f *winfspFS) Write(path string, buffer []byte, offset int64, file_handle uint64) int {
+func (f *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle uint64) int {
 	fmt.Println("Write called for path:", path)
 	fmt.Printf("Data written: %s\n", string(buffer))
 
@@ -200,7 +163,7 @@ func (f *winfspFS) Write(path string, buffer []byte, offset int64, file_handle u
 	return len(buffer)
 }
 
-func (f *winfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
+func (f *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
 	fmt.Println("Create called for path:", path, "with mode:", mode, "and flags:", flags)
 
 	err := f.client.Create(path)
@@ -211,12 +174,12 @@ func (f *winfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
 	return 0, f.NewHandle(path, flags, 0)
 }
 
-func (f *winfspFS) Unlink(path string) int {
+func (f *WinfspFS) Unlink(path string) int {
 	fmt.Println("Unlink called for path:", path)
 	return 0
 }
 
-func (f *winfspFS) Mkdir(path string, mode uint32) int {
+func (f *WinfspFS) Mkdir(path string, mode uint32) int {
 	fmt.Println("Mkdir called for path:", path)
 
 	err := f.client.Mkdir(path, os.FileMode(mode))
@@ -227,7 +190,7 @@ func (f *winfspFS) Mkdir(path string, mode uint32) int {
 	return 0
 }
 
-func (f *winfspFS) Rmdir(path string) int {
+func (f *WinfspFS) Rmdir(path string) int {
 	fmt.Println("Rmdir called for path:", path)
 
 	err := f.client.Rmdir(path)
@@ -238,7 +201,7 @@ func (f *winfspFS) Rmdir(path string) int {
 	return 0
 }
 
-func (f *winfspFS) Rename(oldPath string, newPath string) int {
+func (f *WinfspFS) Rename(oldPath string, newPath string) int {
 	fmt.Println("Rename called from", oldPath, "to", newPath)
 
 	err := f.client.Rename(oldPath, newPath)
@@ -249,7 +212,7 @@ func (f *winfspFS) Rename(oldPath string, newPath string) int {
 	return 0
 }
 
-func (f *winfspFS) Release(path string, file_handle uint64) int {
+func (f *WinfspFS) Release(path string, file_handle uint64) int {
 	fmt.Println("Release called for path:", path, "handle:", file_handle)
 	f.handles.Delete(file_handle)
 	return 0

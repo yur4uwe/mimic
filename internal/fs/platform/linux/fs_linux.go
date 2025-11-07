@@ -1,6 +1,4 @@
-//go:build linux || darwin
-
-package fs
+package linux
 
 import (
 	"fmt"
@@ -11,22 +9,20 @@ import (
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
-	"github.com/mimic/internal/fs/entries"
-	"github.com/mimic/internal/interfaces"
+	"github.com/mimic/internal/fs/platform/linux/entries"
+	"github.com/studio-b12/gowebdav"
 )
 
-type fuseFS struct {
-	clent interfaces.WebClient
+type FuseFS struct {
+	Wc *gowebdav.Client
 }
 
-func New(webdavClient interfaces.WebClient) FS {
-	return &fuseFS{
-		clent: webdavClient,
-	}
-}
-
-func (f *fuseFS) Mount(mountpoint string) error {
-	c, err := fuse.Mount(mountpoint)
+func (f *FuseFS) Mount(mountpoint string) error {
+	c, err := fuse.Mount(
+		mountpoint,
+		fuse.FSName("mimic"),
+		fuse.Subtype("mimicfs"),
+	)
 	if err != nil {
 		return fmt.Errorf("fuse mount failed: %w", err)
 	}
@@ -50,10 +46,11 @@ func (f *fuseFS) Mount(mountpoint string) error {
 	return nil
 }
 
-func (f *fuseFS) Unmount() error {
+func (f *FuseFS) Unmount() error {
 	return nil
 }
 
-func (f *fuseFS) Root() (fs.Node, error) {
-	return entries.NewNode(f.clent, "/"), nil
+func (f *FuseFS) Root() (fs.Node, error) {
+	log.Println("Root called")
+	return entries.NewNode(f.Wc, "/"), nil
 }

@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,52 @@ type NodeCache struct {
 	entries    sync.Map // map[string]*CacheEntry
 	ttl        time.Duration
 	maxEntries int
+}
+
+// String implements fmt.Stringer and returns a concise summary.
+func (c *NodeCache) String() string {
+	return c.Summary(10)
+}
+
+// Summary returns a concise human-readable representation of the cache.
+// If maxKeys > 0 it includes up to that many entry keys in the output;
+// if maxKeys <= 0 it omits the keys and only prints counts/settings.
+func (c *NodeCache) Summary(maxKeys int) string {
+	total := 0
+	keys := make([]string, 0, 8)
+
+	c.entries.Range(func(k, v interface{}) bool {
+		total++
+		if maxKeys > 0 && len(keys) < maxKeys {
+			if ks, ok := k.(string); ok {
+				keys = append(keys, ks)
+			} else {
+				keys = append(keys, fmt.Sprintf("%v", k))
+			}
+		}
+		return true
+	})
+
+	if maxKeys > 0 {
+		return fmt.Sprintf("NodeCache{entries=%d, ttl=%s, maxEntries=%d, keys=%v}", total, c.ttl, c.maxEntries, keys)
+	}
+	return fmt.Sprintf("NodeCache{entries=%d, ttl=%s, maxEntries=%d}", total, c.ttl, c.maxEntries)
+}
+
+// Format implements fmt.Formatter to support %#v / %+v friendly output.
+func (c *NodeCache) Format(f fmt.State, verb rune) {
+	switch verb {
+	case 'v':
+		if f.Flag('+') || f.Flag('#') {
+			fmt.Fprint(f, c.Summary(0))
+			return
+		}
+		fmt.Fprint(f, c.String())
+	case 's', 'q':
+		fmt.Fprint(f, c.String())
+	default:
+		fmt.Fprint(f, c.String())
+	}
 }
 
 func (c *NodeCache) NewEntry(f os.FileInfo) *CacheEntry {
