@@ -23,6 +23,7 @@ func main() {
 
 	client := gowebdav.NewClient("http://localhost:8080", "admin", "password")
 
+	fmt.Println("Trying to connect to the server...")
 	if err := client.Connect(); err != nil {
 		panic("webdav client: couldn't connect to the server")
 	}

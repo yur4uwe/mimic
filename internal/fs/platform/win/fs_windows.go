@@ -25,7 +25,7 @@ func (f *WinfspFS) Mount(mountpoint string) error {
 	fmt.Println("Mounting WinFSP filesystem at", mountpoint)
 
 	host := fuse.NewFileSystemHost(f)
-	if !host.Mount(mountpoint, nil) {
+	if !host.Mount(mountpoint, []string{"-d"}) {
 		return fmt.Errorf("failed to mount WinFSP filesystem")
 	}
 
