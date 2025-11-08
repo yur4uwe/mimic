@@ -2,6 +2,7 @@ package wrappers
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path"
@@ -88,14 +89,16 @@ func (w *WebdavClient) ReadStreamRange(name string, offset, length int64) (io.Re
 
 // Write writes or overwrites the given file with data.
 func (w *WebdavClient) Write(name string, data []byte) error {
-	// use 0644 as a reasonable default mode
-	if err := w.client.Write(name, data, 0644); err != nil {
+	// use 0777 as a reasonable default mode
+	if err := w.client.Write(name, data, 0777); err != nil {
 		return err
 	}
 
 	// update cache entry for the file if possible
-	if stat, err := w.client.Stat(name); err == nil {
+	if stat, err := w.Stat(name); err == nil {
 		w.cache.Set(name, w.cache.NewEntry(stat))
+	} else {
+		fmt.Println("Error:", err)
 	}
 
 	// invalidate parent directory listing so callers see the new/updated file

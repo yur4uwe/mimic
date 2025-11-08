@@ -3,6 +3,7 @@ package win
 import (
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 
 	"github.com/mimic/internal/core/casters"
@@ -25,6 +26,10 @@ type openedFile struct {
 	path  string
 	flags int
 	size  int64
+
+	mu    sync.Mutex
+	buf   []byte
+	dirty bool
 }
 
 func (f *WinfspFS) NewHandle(path string, flags int, size int64) uint64 {
@@ -64,14 +69,15 @@ func (f *WinfspFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 		return 0
 	}
 
-	fmt.Println("Getattr called for path:", path)
-
 	file, err := f.client.Stat(path)
 	if err != nil {
-		return -EIO
+		fmt.Println("Getattr: Stat error for path:", path, "error:", err)
+		return -ENOENT
 	}
 
 	*stat = *casters.FileInfoCast(file)
+
+	fmt.Println("Getattr called for path:", path)
 
 	return 0
 }
@@ -84,7 +90,6 @@ func (f *WinfspFS) Open(path string, flags int) (int, uint64) {
 	}
 
 	if fi.IsDir() && (flags&fuse.O_WRONLY != 0 || flags&fuse.O_RDWR != 0) {
-		EISDIR := 1
 		return -EISDIR, 0
 	}
 
@@ -124,38 +129,6 @@ func (f *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle ui
 	return n
 }
 
-func (f *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle uint64) int {
-	fmt.Println("Write called for path:", path)
-	fmt.Printf("Data written: %s\n", string(buffer))
-
-	file, ok := f.GetHandle(file_handle)
-	if !ok {
-		return -EIO
-	}
-
-	if offset >= file.size {
-		return 0 // EOF
-	}
-
-	err := f.client.Write(file.path, buffer)
-	if err != nil {
-		return -EIO
-	}
-
-	return len(buffer)
-}
-
-func (f *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
-	fmt.Println("Create called for path:", path, "with mode:", mode, "and flags:", flags)
-
-	err := f.client.Create(path)
-	if err != nil {
-		return -EIO, 0
-	}
-
-	return 0, f.NewHandle(path, flags, 0)
-}
-
 func (f *WinfspFS) Rename(oldPath string, newPath string) int {
 	fmt.Println("Rename called from", oldPath, "to", newPath)
 
@@ -169,6 +142,13 @@ func (f *WinfspFS) Rename(oldPath string, newPath string) int {
 
 func (f *WinfspFS) Release(path string, file_handle uint64) int {
 	fmt.Println("Release called for path:", path, "handle:", file_handle)
+
+	// try to flush first
+	if res := f.Fsync(path, false, file_handle); res != 0 {
+		// log but still attempt to drop handle
+		fmt.Println("Release: fsync returned", res)
+	}
+
 	f.handles.Delete(file_handle)
 	return 0
 }

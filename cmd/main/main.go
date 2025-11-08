@@ -33,7 +33,7 @@ func main() {
 	filesystem := fs.New(webdavClient)
 	mountpoint := flag.Arg(0)
 
-	if err := filesystem.Mount(mountpoint, nil); err != nil {
+	if err := filesystem.Mount(mountpoint, []string{}); err != nil {
 		fmt.Println("Mount failed:", err)
 		os.Exit(1)
 	}
