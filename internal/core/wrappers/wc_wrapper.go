@@ -1,6 +1,7 @@
 package wrappers
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path"
@@ -107,6 +108,16 @@ func (w *WebdavClient) Write(name string, data []byte) error {
 	return nil
 }
 
+// WriteStream writes or overwrites the given file with data from the stream.
+func (w *WebdavClient) WriteStream(name string, data io.Reader) error {
+	return w.client.WriteStream(name, data, 0644)
+}
+
+// WriteStreamRange writes or overwrites a range of the given file with data from the stream.
+func (w *WebdavClient) WriteStreamRange(name string, data io.Reader, offset int64) error {
+	return w.client.WriteStreamWithLength(name, data, offset, 0644)
+}
+
 // Create creates a new file with provided data.
 // By default it can alias Write.
 func (w *WebdavClient) Create(name string) error {
@@ -171,4 +182,108 @@ func (w *WebdavClient) Rename(oldname, newname string) error {
 	w.cache.Invalidate(path.Dir(newname))
 
 	return nil
+}
+
+// Truncate resizes the remote file to `size`.
+// Strategy:
+//   - stat current size
+//   - if shrinking: read range [0,size) (prefer ReadStreamRange) and PUT that slice
+//   - if extending: read whole file (or available prefix), append zero bytes to requested size and PUT
+func (w *WebdavClient) Truncate(name string, size int64) error {
+	// normalize
+	if strings.HasSuffix(name, "/") && name != "/" {
+		name = strings.TrimSuffix(name, "/")
+	}
+
+	// get current size
+	fi, err := w.client.Stat(name)
+	if err != nil {
+		// if file doesn't exist and size==0 create empty file
+		if os.IsNotExist(err) {
+			if size == 0 {
+				if err := w.Write(name, []byte{}); err == nil {
+					// Write already invalidates cache; return nil
+					return nil
+				}
+			}
+			return err
+		}
+		return err
+	}
+	cur := fi.Size()
+
+	// nothing to do
+	if int64(cur) == size {
+		return nil
+	}
+
+	// helper to commit bytes using streaming when beneficial
+	commit := func(data []byte) error {
+		// prefer streaming write for large payloads to avoid huge memory duplication in client libraries
+		if len(data) > 4*1024*1024 { // threshold: 4 MiB
+			// use WriteStream if available
+			if err := w.client.WriteStream(name, bytes.NewReader(data), 0644); err != nil {
+				return err
+			}
+			// update cache after successful upload
+			if stat, err := w.client.Stat(name); err == nil {
+				w.cache.Set(name, w.cache.NewEntry(stat))
+			}
+			// invalidate parent listing
+			parent := path.Dir(name)
+			if parent == "." || parent == "" {
+				parent = "/"
+			}
+			w.cache.Invalidate(parent)
+			return nil
+		}
+		// small payload — reuse existing Write which also updates cache
+		return w.Write(name, data)
+	}
+
+	// shrink
+	if int64(cur) > size {
+		// attempt ranged read
+		if rc, err := w.client.ReadStreamRange(name, 0, size); err == nil {
+			defer rc.Close()
+			data, err := io.ReadAll(rc)
+			if err != nil {
+				return err
+			}
+			return commit(data)
+		}
+		// fallback to full read + slice
+		all, err := w.client.Read(name)
+		if err != nil {
+			return err
+		}
+		if int64(len(all)) < size {
+			// unexpected: treat as extend
+			size = int64(len(all))
+		}
+		return commit(all[:size])
+	}
+
+	// extend
+	// read existing content (stream or whole)
+	var existing []byte
+	if rc, err := w.client.ReadStreamRange(name, 0, int64(cur)); err == nil {
+		defer rc.Close()
+		existing, err = io.ReadAll(rc)
+		if err != nil {
+			return err
+		}
+	} else {
+		all, err := w.client.Read(name)
+		if err != nil {
+			return err
+		}
+		existing = all
+	}
+
+	// create new buffer sized to `size`, copy existing and leave rest zeros
+	buf := make([]byte, size)
+	copy(buf, existing)
+
+	return commit(buf)
 }

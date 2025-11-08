@@ -23,7 +23,7 @@ func New(wc interfaces.WebClient) *FuseFS {
 	}
 }
 
-func (f *FuseFS) Mount(mountpoint string) error {
+func (f *FuseFS) Mount(mountpoint string, mflags []string) error {
 	c, err := fuse.Mount(
 		mountpoint,
 		fuse.FSName("mimic"),

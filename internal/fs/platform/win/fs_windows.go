@@ -21,11 +21,11 @@ func New(webdavClient interfaces.WebClient) *WinfspFS {
 	}
 }
 
-func (f *WinfspFS) Mount(mountpoint string) error {
+func (f *WinfspFS) Mount(mountpoint string, flags []string) error {
 	fmt.Println("Mounting WinFSP filesystem at", mountpoint)
 
 	host := fuse.NewFileSystemHost(f)
-	if !host.Mount(mountpoint, []string{"-d"}) {
+	if !host.Mount(mountpoint, flags) {
 		return fmt.Errorf("failed to mount WinFSP filesystem")
 	}
 
