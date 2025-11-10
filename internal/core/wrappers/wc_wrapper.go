@@ -118,7 +118,86 @@ func (w *WebdavClient) WriteStream(name string, data io.Reader) error {
 
 // WriteStreamRange writes or overwrites a range of the given file with data from the stream.
 func (w *WebdavClient) WriteStreamRange(name string, data io.Reader, offset int64) error {
-	return w.client.WriteStreamWithLength(name, data, offset, 0644)
+	// Many WebDAV clients (or their underlying HTTP helpers) expect the
+	// Content-Length header to match the provided reader exactly. Some
+	// implementations used by tests/clients will set ContentLength to the
+	// existing file size which causes a mismatch when writing a range that
+	// extends the file. To keep semantics correct and portable, implement a
+	// safe fallback: read the incoming stream into memory, merge it into the
+	// existing file contents at `offset`, and PUT the resulting full file.
+	// This is less efficient than a true ranged upload but avoids ContentLength
+	// mismatches and keeps behavior correct for small/typical writes.
+
+	// Read incoming chunk
+	chunk, err := io.ReadAll(data)
+	if err != nil {
+		return err
+	}
+
+	// Normalize name
+	if strings.HasSuffix(name, "/") && name != "/" {
+		name = strings.TrimSuffix(name, "/")
+	}
+
+	// Get current size (if file exists)
+	var curSize int64
+	if fi, err := w.client.Stat(name); err == nil {
+		curSize = fi.Size()
+	} else {
+		// if file doesn't exist, treat curSize as 0
+		curSize = 0
+	}
+
+	end := offset + int64(len(chunk))
+	newSize := curSize
+	if end > newSize {
+		newSize = end
+	}
+
+	// Build new buffer containing existing content with chunk applied at offset
+	buf := make([]byte, newSize)
+
+	// Attempt ranged read of existing data
+	if curSize > 0 {
+		if rc, err := w.client.ReadStreamRange(name, 0, curSize); err == nil {
+			defer rc.Close()
+			if _, err := io.ReadFull(rc, buf[:curSize]); err != nil {
+				// fallback to full read
+				if all, err := w.client.Read(name); err == nil {
+					copy(buf, all)
+				} else {
+					return err
+				}
+			}
+		} else {
+			// fallback to full read
+			if all, err := w.client.Read(name); err == nil {
+				copy(buf, all)
+			} else {
+				return err
+			}
+		}
+	}
+
+	// apply chunk at offset
+	copy(buf[offset:], chunk)
+
+	// Commit: for large payloads use streaming write to avoid extra copy in some clients
+	if len(buf) > 4*1024*1024 {
+		if err := w.client.WriteStream(name, bytes.NewReader(buf), 0644); err != nil {
+			return err
+		}
+		// update cache
+		if stat, err := w.client.Stat(name); err == nil {
+			w.cache.Set(name, w.cache.NewEntry(stat))
+		}
+	} else {
+		if err := w.Write(name, buf); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Create creates a new file with provided data.
