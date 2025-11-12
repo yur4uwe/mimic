@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mimic/internal/core/wrappers"
@@ -11,38 +12,74 @@ import (
 	"github.com/studio-b12/gowebdav"
 )
 
+func usage() {
+	fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [options] <mountpoint> <server>\n", os.Args[0])
+	flag.PrintDefaults()
+}
+
 func main() {
+	var (
+		user       string
+		ttl        time.Duration
+		maxEntries int
+		verbose    bool
+		logFile    string
+	)
+
+	flag.StringVar(&user, "u", "", "username:password (shorthand)")
+	flag.StringVar(&user, "user", "", "username:password")
+	flag.DurationVar(&ttl, "ttl", time.Minute, "cache TTL")
+	flag.IntVar(&maxEntries, "me", 1000, "cache max entries")
+	flag.BoolVar(&verbose, "v", false, "enable verbose logging")
+	flag.BoolVar(&verbose, "verbose", false, "enable verbose logging")
+	flag.StringVar(&logFile, "l", "", "log file")
+	flag.StringVar(&logFile, "log", "", "log file")
+
+	flag.Usage = usage
 	flag.Parse()
 
-	// options to do
-	// - mountpoint: no flag
-	// - backend URL: no flag
-	// - credentials: -u username:password
-	// - cache options: TTL, max entries
-	// - logging options: -v verbosity, -l log file
-	// - config file?: -c
-
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Println("Recovered from panic:", r)
-			os.Exit(1)
-		}
-	}()
-
-	client := gowebdav.NewClient("http://localhost:8080", "admin", "password")
-
-	fmt.Println("Trying to connect to the server...")
-	if err := client.Connect(); err != nil {
-		panic("webdav client: couldn't connect to the server")
+	if flag.NArg() < 2 {
+		fmt.Fprintln(os.Stderr, "Error: missing required positional arguments: <mountpoint> <server>")
+		flag.Usage()
+		os.Exit(2)
 	}
 
-	webdavClient := wrappers.NewWebdavClient(client, time.Millisecond, 1000)
-
-	filesystem := fs.New(webdavClient)
 	mountpoint := flag.Arg(0)
+	server := flag.Arg(1)
+
+	if user == "" {
+		fmt.Fprintln(os.Stderr, "Error: missing credentials; provide -u username:password")
+		flag.Usage()
+		os.Exit(2)
+	}
+
+	parts := strings.SplitN(user, ":", 2)
+	username := parts[0]
+	password := ""
+	if len(parts) > 1 {
+		password = parts[1]
+	}
+	if username == "" || password == "" {
+		fmt.Fprintln(os.Stderr, "Error: credentials must be in form username:password")
+		os.Exit(2)
+	}
+
+	if verbose {
+		fmt.Printf("mount=%q server=%q user=%q ttl=%s maxEntries=%d\n", mountpoint, server, username, ttl, maxEntries)
+	}
+
+	client := gowebdav.NewClient(server, username, password)
+	fmt.Println("Trying to connect to the server...")
+	if err := client.Connect(); err != nil {
+		fmt.Fprintln(os.Stderr, "webdav client: couldn't connect to the server:", err)
+		os.Exit(1)
+	}
+
+	webdavClient := wrappers.NewWebdavClient(client, ttl, maxEntries)
+	filesystem := fs.New(webdavClient)
 
 	if err := filesystem.Mount(mountpoint, []string{}); err != nil {
-		fmt.Println("Mount failed:", err)
+		fmt.Fprintln(os.Stderr, "Mount failed:", err)
 		os.Exit(1)
 	}
 }
