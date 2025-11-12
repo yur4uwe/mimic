@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -52,11 +52,9 @@ retry:
 }
 
 func (w *WebdavClient) ReadDir(name string) ([]os.FileInfo, error) {
-	if !strings.HasSuffix(name, "/") {
-		name += "/"
-	}
+	clean := filepath.Clean(name) + "/"
 
-	if children, ok := w.cache.GetChildren(name); ok && children != nil {
+	if children, ok := w.cache.GetChildren(clean); ok && children != nil {
 		return children, nil
 	}
 
@@ -98,13 +96,7 @@ func (w *WebdavClient) commit(name string, data []byte) error {
 		}
 	}
 
-	// Invalidate caches: file and parent listing
-	w.cache.Invalidate(name)
-	parent := path.Dir(name)
-	if parent == "." || parent == "" {
-		parent = "/"
-	}
-	w.cache.Invalidate(parent)
+	w.invalidatePath(name, false)
 
 	return nil
 }
@@ -193,60 +185,42 @@ func (w *WebdavClient) Create(name string) error {
 	return w.commit(name, []byte{})
 }
 
-// Remove deletes a file.
 func (w *WebdavClient) Remove(name string) error {
 	if err := w.client.Remove(name); err != nil {
 		return err
 	}
-
-	w.cache.Invalidate(name)
-	parent := path.Dir(name)
-	if parent == "." || parent == "" {
-		parent = "/"
-	}
-	w.cache.Invalidate(parent)
-
+	w.invalidatePath(name, false)
 	return nil
 }
 
 func (w *WebdavClient) Mkdir(name string, mode os.FileMode) error {
-	if err := w.client.Mkdir(name, mode); err != nil {
+	clean := filepath.Clean(name) + "/"
+
+	if err := w.client.Mkdir(clean, mode); err != nil {
 		return err
 	}
 
 	w.cache.Invalidate(name)
-	parent := path.Dir(name)
-	if parent == "." || parent == "" {
-		parent = "/"
-	}
-	w.cache.Invalidate(parent)
 
 	return nil
 }
 
 func (w *WebdavClient) Rmdir(name string) error {
-	if err := w.client.RemoveAll(name); err != nil {
+	clean := filepath.Clean(name) + "/"
+	if err := w.client.RemoveAll(clean); err != nil {
 		return err
 	}
-
-	w.cache.Invalidate(name)
-	parent := path.Dir(name)
-	if parent == "." || parent == "" {
-		parent = "/"
-	}
-	w.cache.Invalidate(parent)
-
+	w.invalidatePath(clean, true)
 	return nil
 }
 
-// Rename moves/renames a file or directory.
 func (w *WebdavClient) Rename(oldname, newname string) error {
 	if err := w.client.Rename(oldname, newname, true); err != nil {
 		return err
 	}
 
-	w.cache.Invalidate(oldname)
-	w.cache.Invalidate(newname)
+	w.invalidatePath(oldname, true)
+	w.invalidatePath(newname, true)
 
 	return nil
 }
@@ -317,4 +291,32 @@ func (w *WebdavClient) Truncate(name string, size int64) error {
 	copy(buf, existing)
 	// rest is zeroed by default
 	return w.commit(name, buf)
+}
+
+// invalidatePath invalidates the entry and its parent.
+// If isDir==true it also invalidates the whole subtree.
+func (w *WebdavClient) invalidatePath(name string, isDir bool) {
+	// normalize to stable form
+	if name == "" {
+		return
+	}
+	name = filepath.Clean(name)
+
+	if isDir {
+		// ensure trailing slash so children keys (if stored that way) match
+		if !strings.HasSuffix(name, "/") {
+			name = name + "/"
+		}
+		w.cache.InvalidateTree(name) // invalidate subtree
+		w.cache.Invalidate(name)     // invalidate dir entry itself
+	} else {
+		w.cache.Invalidate(name) // invalidate file entry
+	}
+
+	// invalidate parent listing so directory listings refresh
+	parent := filepath.Dir(name)
+	if parent == "." || parent == "" {
+		parent = "/"
+	}
+	w.cache.Invalidate(parent)
 }

@@ -148,8 +148,14 @@ func (n *Node) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 	targetPath := path.Join(n.path, req.Name)
 	fmt.Println("Remove called for path:", targetPath)
 
-	if err := n.wc.Remove(targetPath); err != nil {
-		return err
+	if req.Dir {
+		if err := n.wc.Rmdir(targetPath); err != nil {
+			return err
+		}
+	} else {
+		if err := n.wc.Remove(targetPath); err != nil {
+			return err
+		}
 	}
 
 	return nil

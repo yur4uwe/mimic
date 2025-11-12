@@ -17,7 +17,7 @@ const (
 type CacheEntry struct {
 	Info      os.FileInfo
 	IsDir     bool
-	Children  []os.FileInfo // For directory listings. nil == not cached, non-nil (maybe empty) == cached
+	Children  []os.FileInfo
 	ExpiresAt time.Time
 }
 
@@ -151,15 +151,6 @@ func (c *NodeCache) SetChildren(path string, children []os.FileInfo) {
 	c.entries.Store(path, entry)
 }
 
-func (c *NodeCache) Invalidate(path string) {
-	c.entries.Delete(path)
-
-	parent := filepath.Dir(path)
-	if parent != path {
-		c.entries.Delete(parent)
-	}
-}
-
 func (c *NodeCache) InvalidateTree(path string) {
 	c.entries.Range(func(key, value interface{}) bool {
 		k := key.(string)
@@ -168,4 +159,25 @@ func (c *NodeCache) InvalidateTree(path string) {
 		}
 		return true
 	})
+}
+
+func (c *NodeCache) Invalidate(p string) {
+	if p == "" {
+		return
+	}
+	p = filepath.Clean(p)
+
+	c.entries.Delete(p)
+
+	if !strings.HasSuffix(p, string(os.PathSeparator)) {
+		c.entries.Delete(p + string(os.PathSeparator))
+	}
+
+	parent := filepath.Dir(p)
+	if parent != p {
+		c.entries.Delete(parent)
+		if !strings.HasSuffix(parent, string(os.PathSeparator)) {
+			c.entries.Delete(parent + string(os.PathSeparator))
+		}
+	}
 }

@@ -28,7 +28,7 @@ func main() {
 		panic("webdav client: couldn't connect to the server")
 	}
 
-	webdavClient := wrappers.NewWebdavClient(client, time.Minute, 1000)
+	webdavClient := wrappers.NewWebdavClient(client, time.Millisecond, 1000)
 
 	filesystem := fs.New(webdavClient)
 	mountpoint := flag.Arg(0)
