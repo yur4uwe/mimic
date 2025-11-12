@@ -14,14 +14,12 @@ type WebClient interface {
 	ReadDir(name string) ([]os.FileInfo, error)
 
 	// Read helpers
-	Read(name string) ([]byte, error)                                         // read whole file
-	ReadStream(name string) (io.ReadCloser, error)                            // streaming read
-	ReadStreamRange(name string, offset, length int64) (io.ReadCloser, error) // ranged streaming read
+	Read(name string) ([]byte, error)              // read whole file
+	ReadStream(name string) (io.ReadCloser, error) // streaming read
 
 	// Write
-	Write(name string, data []byte) error                             // write/overwrite with byte slice
-	WriteStream(name string, data io.Reader) error                    // write/overwrite with stream
-	WriteStreamRange(name string, data io.Reader, offset int64) error // write/overwrite range with stream
+	Write(name string, data []byte) error          // write/overwrite with byte slice
+	WriteStream(name string, data io.Reader) error // write/overwrite with stream
 
 	// create / remove
 	Create(name string) error                  // create new file with data (can alias Write)
