@@ -70,7 +70,7 @@ run_step "Show file content" cat "$MOUNT"/test_basic.txt
 
 run_step "Append line" bash -c "echo 'append-line' >> '$MOUNT'/test_basic.txt"
 sleep $SLEEP_AFTER_OP
-run_step "Verify appended line" bash -c "tail -n +1 '$MOUNT'/test_basic.txt"
+run_step "Verify appended line" bash -c "grep -q 'append-line' '$MOUNT'/test_basic.txt"
 
 run_step "Rename file" mv "$MOUNT"/test_basic.txt "$MOUNT"/test_basic.renamed
 sleep $SLEEP_AFTER_OP
@@ -78,25 +78,27 @@ run_step "Verify renamed exists" bash -c "ls -l '$MOUNT' | grep -q test_basic.re
 
 run_step "Large write (10MB)" dd if=/dev/zero of="$MOUNT"/test_big.bin bs=1M count=10 status=none
 sleep $SLEEP_AFTER_OP
-run_step "Verify large file size" stat -c '%n %s' "$MOUNT"/test_big.bin
+run_step "Verify large file size" bash -c "size=\$(stat -c '%s' '$MOUNT'/test_big.bin 2>/dev/null || echo 0); [ \"\$size\" -ge $((10*1024*1024)) ]"
 
 echo "$(timestamp) Starting concurrent append/read test"
-# start background appender
-run_step "Start background appender" bash -c "( for i in {1..20}; do echo \"x\$i\" >> '$MOUNT'/test_big_stream.txt; sleep 0.05; done ) &"
 
-# give writer a moment to start
+( for i in {1..20}; do echo "x$i" >> "$MOUNT"/test_big_stream.txt; sleep 0.05; done ) &
+APPENDER_PID=$!
+
 sleep 0.1
 
-# tail a little and then stop
 tail -n +1 -f "$MOUNT"/test_big_stream.txt 2>/dev/null &
 TAILPID=$!
 sleep 0.5
 kill "$TAILPID" 2>/dev/null || true
 wait "$TAILPID" 2>/dev/null || true
 
+wait "$APPENDER_PID" 2>/dev/null || true
+
 run_step "Verify stream file exists" test -f "$MOUNT"/test_big_stream.txt
 
 run_step "Remove test files" rm -f "$MOUNT"/test_basic.renamed "$MOUNT"/test_big.bin "$MOUNT"/test_big_stream.txt || true
 sleep $SLEEP_AFTER_OP
+run_step "Verify removal" bash -c "test ! -e '$MOUNT'/test_basic.renamed && test ! -e '$MOUNT'/test_big.bin && test ! -e '$MOUNT'/test_big_stream.txt"
 
 echo "$(timestamp) All steps completed"

@@ -3,6 +3,7 @@ package win
 import (
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -140,5 +141,15 @@ func (f *WinfspFS) Rename(oldPath string, newPath string) int {
 func (f *WinfspFS) Release(path string, file_handle uint64) int {
 	fmt.Printf("[log] (Release): path=%s handle=%d\n", path, file_handle)
 	f.handles.Delete(file_handle)
+	return 0
+}
+
+func (f *WinfspFS) Utimens(path string, times []fuse.Timespec) int {
+	fmt.Printf("[log] (Utimens): path=%s times=%#v\n", path, times)
+	if strings.HasSuffix(path, "/") && path != "/" {
+		path = strings.TrimSuffix(path, "/")
+	}
+
+	// no direct support for setting times in WebDAV; ignore for now
 	return 0
 }

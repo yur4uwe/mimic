@@ -14,6 +14,14 @@ import (
 func main() {
 	flag.Parse()
 
+	// options to do
+	// - mountpoint: no flag
+	// - backend URL: no flag
+	// - credentials: -u username:password
+	// - cache options: TTL, max entries
+	// - logging options: -v verbosity, -l log file
+	// - config file?: -c
+
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("Recovered from panic:", r)
