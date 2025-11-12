@@ -1,4 +1,5 @@
-// go:build windows
+//go:build windows && !test
+// +build windows,!test
 
 /*
  * memfs.go
