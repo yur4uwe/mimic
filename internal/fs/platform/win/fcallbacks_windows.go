@@ -1,7 +1,6 @@
 package win
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"strings"
@@ -101,7 +100,7 @@ func (f *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle u
 
 	// Write the provided buffer directly to the remote backend at the
 	// requested offset using a ranged stream write.
-	if err := f.client.WriteStreamRange(file.path, bytes.NewReader(buffer), offset); err != nil {
+	if err := f.client.WriteOffset(file.path, buffer, offset); err != nil {
 		fmt.Printf("[log] (Write): remote write error=%v path=%s fh=%d offset=%d len=%d\n", err, file.path, file_handle, offset, len(buffer))
 		return -fuse.EIO
 	}

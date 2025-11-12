@@ -110,7 +110,7 @@ func (f *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle ui
 	}
 
 	toRead := len(buffer)
-	rc, err := f.client.ReadStreamRange(file.path, offset, int64(toRead))
+	rc, err := f.client.ReadRange(file.path, offset, int64(toRead))
 	if err != nil {
 		return -fuse.EIO
 	}

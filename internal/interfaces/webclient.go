@@ -16,10 +16,11 @@ type WebClient interface {
 	// Read helpers
 	Read(name string) ([]byte, error)              // read whole file
 	ReadStream(name string) (io.ReadCloser, error) // streaming read
+	ReadRange(name string, offset, length int64) (io.ReadCloser, error)
 
 	// Write
-	Write(name string, data []byte) error          // write/overwrite with byte slice
-	WriteStream(name string, data io.Reader) error // write/overwrite with stream
+	Write(name string, data []byte) error // write/overwrite with byte slice
+	WriteOffset(name string, data []byte, offset int64) error
 
 	// create / remove
 	Create(name string) error                  // create new file with data (can alias Write)

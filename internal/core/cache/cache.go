@@ -93,14 +93,12 @@ func (c *NodeCache) Get(path string) (*CacheEntry, bool) {
 	if val, ok := c.entries.Load(path); ok {
 		entry, ok2 := val.(*CacheEntry)
 		if !ok2 {
-			// invalid type stored; remove and treat as miss
 			c.entries.Delete(path)
 			return nil, false
 		}
 		if time.Now().Before(entry.ExpiresAt) {
 			return entry, true
 		}
-		// expired
 		c.entries.Delete(path)
 	}
 	return nil, false
@@ -111,8 +109,6 @@ func (c *NodeCache) Set(path string, entry *CacheEntry) {
 	c.entries.Store(path, entry)
 }
 
-// GetChildren returns (children, true) when children are present in cache (even if empty).
-// If children are not cached (nil) or the entry is missing/expired it returns (nil, false).
 func (c *NodeCache) GetChildren(path string) ([]os.FileInfo, bool) {
 	if val, ok := c.entries.Load(path); ok {
 		entry, ok2 := val.(*CacheEntry)
@@ -133,8 +129,6 @@ func (c *NodeCache) GetChildren(path string) ([]os.FileInfo, bool) {
 	return nil, false
 }
 
-// SetChildren stores children for the given path. It will create or update an entry.
-// Use an empty slice to indicate "cached and empty".
 func (c *NodeCache) SetChildren(path string, children []os.FileInfo) {
 	var entry *CacheEntry
 	if val, ok := c.entries.Load(path); ok {
