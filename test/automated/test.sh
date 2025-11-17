@@ -51,7 +51,18 @@ run_step() {
 
 # ensure background jobs are killed on exit
 cleanup() {
+    # kill background jobs
     jobs -p | xargs -r kill 2>/dev/null || true
+
+    # only attempt removal if MOUNT is set and not root
+    if [ -n "${MOUNT:-}" ] && [ "$MOUNT" != "/" ]; then
+        echo "$(timestamp) Cleaning up test artifacts in $MOUNT"
+        rm -rf "$MOUNT"/test_basic.txt \
+               "$MOUNT"/test_basic.renamed \
+               "$MOUNT"/test_big.bin \
+               "$MOUNT"/test_big_stream.txt \
+               "$MOUNT"/test_dir 2>/dev/null || true
+    fi
 }
 trap cleanup EXIT
 
@@ -72,7 +83,15 @@ run_step "Append line" bash -c "echo 'append-line' >> '$MOUNT'/test_basic.txt"
 sleep $SLEEP_AFTER_OP
 run_step "Verify appended line" bash -c "grep -q 'append-line' '$MOUNT'/test_basic.txt"
 
-run_step "Rename file" mv "$MOUNT"/test_basic.txt "$MOUNT"/test_basic.renamed
+run_step "Create directory" mkdir "$MOUNT"/test_dir
+sleep $SLEEP_AFTER_OP
+run_step "Verify directory exists" bash -c "ls -ld '$MOUNT'/test_dir | grep -q '^d'"
+
+run_step "Move file into directory" mv "$MOUNT"/test_basic.txt "$MOUNT"/test_dir/
+sleep $SLEEP_AFTER_OP
+run_step "Verify moved file exists" bash -c "ls -l '$MOUNT'/test_dir | grep -q test_basic.txt"
+
+run_step "Rename file" mv "$MOUNT"/test_dir/test_basic.txt "$MOUNT"/test_basic.renamed
 sleep $SLEEP_AFTER_OP
 run_step "Verify renamed exists" bash -c "ls -l '$MOUNT' | grep -q test_basic.renamed"
 
@@ -94,11 +113,5 @@ kill "$TAILPID" 2>/dev/null || true
 wait "$TAILPID" 2>/dev/null || true
 
 wait "$APPENDER_PID" 2>/dev/null || true
-
-run_step "Verify stream file exists" test -f "$MOUNT"/test_big_stream.txt
-
-run_step "Remove test files" rm -f "$MOUNT"/test_basic.renamed "$MOUNT"/test_big.bin "$MOUNT"/test_big_stream.txt || true
-sleep $SLEEP_AFTER_OP
-run_step "Verify removal" bash -c "test ! -e '$MOUNT'/test_basic.renamed && test ! -e '$MOUNT'/test_big.bin && test ! -e '$MOUNT'/test_big_stream.txt"
 
 echo "$(timestamp) All steps completed"

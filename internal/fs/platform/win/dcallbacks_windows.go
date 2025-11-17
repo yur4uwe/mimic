@@ -1,7 +1,6 @@
 package win
 
 import (
-	"fmt"
 	"os"
 	"path"
 	"strings"
@@ -55,7 +54,7 @@ func (f *WinfspFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int6
 
 		stat := casters.FileInfoCast(file)
 
-		fmt.Printf("[log] (ReaddirEntry): idx=%d name=%s dir=%v size=%d\n", i, name, file.IsDir(), file.Size())
+		f.logger.Logf("[log] (ReaddirEntry): idx=%d name=%s dir=%v size=%d\n", i, name, file.IsDir(), file.Size())
 
 		fill(name, stat, 0)
 	}
