@@ -65,6 +65,7 @@ func (f *WinfspFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int6
 
 func (f *WinfspFS) Mkdir(p string, mode uint32) int {
 	f.logger.Logf("[log] (Mkdir): path=%s mode=%#o", p, mode)
+	fmt.Println("Unnormalized path:", p)
 	s, err := casters.NormalizePath(p)
 	if err != nil {
 		f.logger.Errorf("[Mkdir] Path unescape error for path=%s error=%v", p, err)
