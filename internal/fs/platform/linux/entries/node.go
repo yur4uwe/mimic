@@ -4,7 +4,7 @@ package entries
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"hash/crc32"
 	"log"
 	"os"
@@ -17,18 +17,21 @@ import (
 	"bazil.org/fuse/fs"
 	"github.com/mimic/internal/core/casters"
 	"github.com/mimic/internal/core/checks"
+	"github.com/mimic/internal/core/logger"
 	"github.com/mimic/internal/interfaces"
 )
 
 type Node struct {
-	wc   interfaces.WebClient
-	path string
+	wc     interfaces.WebClient
+	logger logger.FullLogger
+	path   string
 }
 
-func NewNode(wc interfaces.WebClient, path string) *Node {
+func NewNode(wc interfaces.WebClient, logger logger.FullLogger, path string) *Node {
 	return &Node{
-		wc:   wc,
-		path: path,
+		wc:     wc,
+		logger: logger,
+		path:   path,
 	}
 }
 
@@ -65,7 +68,7 @@ func (n *Node) Attr(ctx context.Context, a *fuse.Attr) error {
 
 func (n *Node) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	childPath := path.Join(n.path, name)
-	fmt.Println("Lookup called for path:", childPath)
+	n.logger.Logf("Lookup called for path: %s", childPath)
 
 	fi, err := n.wc.Stat(childPath)
 	if err != nil {
@@ -80,11 +83,11 @@ func (n *Node) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		return &Node{wc: n.wc, path: childPath}, nil
 	}
 
-	return &Handle{path: childPath, wc: n.wc}, nil
+	return &Handle{path: childPath, logger: n.logger, wc: n.wc}, nil
 }
 
 func (n *Node) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
-	fmt.Println("ReadDirAll called for path:", n.path)
+	n.logger.Logf("ReadDirAll called for path: %s", n.path)
 
 	infos, err := n.wc.ReadDir(n.path)
 	if err != nil {
@@ -123,30 +126,30 @@ func (n *Node) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 
 func (n *Node) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, error) {
 	newDirPath := path.Join(n.path, req.Name)
-	fmt.Println("Mkdir called for path:", newDirPath)
+	n.logger.Logf("Mkdir called for path: %s", newDirPath)
 	if err := n.wc.Mkdir(newDirPath, req.Mode); err != nil {
 		return nil, err
 	}
 
-	return &Node{wc: n.wc, path: newDirPath}, nil
+	return &Node{wc: n.wc, logger: n.logger, path: newDirPath}, nil
 }
 
 func (n *Node) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
 	newFilePath := path.Join(n.path, req.Name)
-	fmt.Println("Create called for path:", newFilePath)
+	n.logger.Logf("Create called for path: %s", newFilePath)
 
 	if err := n.wc.Create(newFilePath); err != nil {
 		return nil, nil, err
 	}
 
-	handle := &Handle{path: newFilePath, wc: n.wc}
-	node := &Node{wc: n.wc, path: newFilePath}
+	handle := &Handle{path: newFilePath, wc: n.wc, logger: n.logger}
+	node := &Node{wc: n.wc, logger: n.logger, path: newFilePath}
 	return node, handle, nil
 }
 
 func (n *Node) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 	targetPath := path.Join(n.path, req.Name)
-	fmt.Println("Remove called for path:", targetPath)
+	n.logger.Logf("Remove called for path: %s", targetPath)
 
 	if req.Dir {
 		if err := n.wc.Rmdir(targetPath); err != nil {
@@ -165,11 +168,11 @@ func (n *Node) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.No
 	oldPath := path.Join(n.path, req.OldName)
 	newNode, ok := newDir.(*Node)
 	if !ok {
-		return fmt.Errorf("invalid target directory")
+		return errors.New("invalid target directory")
 	}
 
 	newPath := path.Join(newNode.path, req.NewName)
-	fmt.Println("Rename called from path:", oldPath, "to path:", newPath)
+	n.logger.Logf("Rename called from path: %s to path: %s", oldPath, newPath)
 	if err := n.wc.Rename(oldPath, newPath); err != nil {
 		return err
 	}
@@ -195,9 +198,9 @@ func (n *Node) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse
 }
 
 func (n *Node) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
-	fmt.Println("Open called for path:", n.path)
+	n.logger.Logf("Open called for path:", n.path)
 
-	handle := &Handle{path: n.path, wc: n.wc}
+	handle := &Handle{path: n.path, wc: n.wc, logger: n.logger}
 
 	return handle, nil
 }

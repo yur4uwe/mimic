@@ -4,7 +4,6 @@ package entries
 
 import (
 	"context"
-	"fmt"
 	"hash/crc32"
 	"os"
 	"sync"
@@ -12,12 +11,14 @@ import (
 
 	"bazil.org/fuse"
 	"github.com/mimic/internal/core/casters"
+	"github.com/mimic/internal/core/logger"
 	"github.com/mimic/internal/interfaces"
 )
 
 type Handle struct {
-	path string
-	wc   interfaces.WebClient
+	path   string
+	wc     interfaces.WebClient
+	logger logger.FullLogger
 
 	mu       sync.Mutex
 	segments map[int64][]byte
@@ -105,7 +106,7 @@ func (h *Handle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
 
 	merged := h.mergeSegmentsInto(base)
 
-	fmt.Println("Fsync called to flush:", h.path)
+	h.logger.Logf("Fsync called to flush: %s", h.path)
 
 	if err := h.wc.Write(h.path, merged); err != nil {
 		return err
@@ -128,7 +129,7 @@ func (h *Handle) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
 }
 
 func (h *Handle) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
-	fmt.Println("ReadDirAll called for", h.path)
+	h.logger.Logf("ReadDirAll called for %s", h.path)
 
 	ents, err := h.wc.ReadDir(h.path)
 	if err != nil {

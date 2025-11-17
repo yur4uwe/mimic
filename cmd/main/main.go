@@ -1,14 +1,15 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/mimic/internal/core/logger"
 	"github.com/mimic/internal/core/wrappers"
 	"github.com/mimic/internal/fs"
+	flag "github.com/spf13/pflag"
 	"github.com/studio-b12/gowebdav"
 )
 
@@ -19,24 +20,26 @@ func usage() {
 
 func main() {
 	var (
-		user       string
-		ttl        time.Duration
-		maxEntries int
-		verbose    bool
-		logFile    string
+		userPtr       *string
+		ttlPtr        *time.Duration
+		maxEntriesPtr *int
+		verbosePtr    *bool
+		logOutputs    []string
 	)
 
-	flag.StringVar(&user, "u", "", "username:password (shorthand)")
-	flag.StringVar(&user, "user", "", "username:password")
-	flag.DurationVar(&ttl, "ttl", time.Minute, "cache TTL")
-	flag.IntVar(&maxEntries, "me", 1000, "cache max entries")
-	flag.BoolVar(&verbose, "v", false, "enable verbose logging")
-	flag.BoolVar(&verbose, "verbose", false, "enable verbose logging")
-	flag.StringVar(&logFile, "l", "", "log file")
-	flag.StringVar(&logFile, "log", "", "log file")
+	userPtr = flag.StringP("user", "u", "", "username:password (shorthand)")
+	ttlPtr = flag.DurationP("ttl", "t", time.Minute, "cache TTL")
+	maxEntriesPtr = flag.IntP("max-entries", "m", 1000, "cache max entries")
+	verbosePtr = flag.BoolP("verbose", "v", false, "enable verbose logging")
+	logOutputs = *flag.StringSliceP("l", "l", []string{}, "log outputs: stdout, stderr, or file paths (repeatable or CSV)")
 
 	flag.Usage = usage
 	flag.Parse()
+
+	user := *userPtr
+	ttl := *ttlPtr
+	maxEntries := *maxEntriesPtr
+	verbose := *verbosePtr
 
 	if flag.NArg() < 2 {
 		fmt.Fprintln(os.Stderr, "Error: missing required positional arguments: <mountpoint> <server>")
@@ -75,11 +78,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	logger := logger.New(verbose, logOutputs)
+
 	webdavClient := wrappers.NewWebdavClient(client, ttl, maxEntries)
-	filesystem := fs.New(webdavClient)
+	filesystem := fs.New(webdavClient, logger)
 
 	if err := filesystem.Mount(mountpoint, []string{}); err != nil {
-		fmt.Fprintln(os.Stderr, "Mount failed:", err)
+		logger.Errorf("Mount failed: %v", err)
 		os.Exit(1)
 	}
 }

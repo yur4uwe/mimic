@@ -1,7 +1,6 @@
 package win
 
 import (
-	"fmt"
 	"os"
 	"strings"
 
@@ -10,7 +9,7 @@ import (
 )
 
 func (f *WinfspFS) Truncate(p string, size int64, fh uint64) int {
-	fmt.Printf("[log] (Truncate): path=%s fh=%d size=%d\n", p, fh, size)
+	f.logger.Logf("[log] (Truncate): path=%s fh=%d size=%d", p, fh, size)
 
 	if strings.HasSuffix(p, "/") && p != "/" {
 		p = strings.TrimSuffix(p, "/")
@@ -25,7 +24,7 @@ func (f *WinfspFS) Truncate(p string, size int64, fh uint64) int {
 }
 
 func (f *WinfspFS) Unlink(p string) int {
-	fmt.Printf("[log] (Unlink): path=%s\n", p)
+	f.logger.Logf("[log] (Unlink): path=%s", p)
 	if strings.HasSuffix(p, "/") && p != "/" {
 		p = strings.TrimSuffix(p, "/")
 	}
@@ -37,7 +36,7 @@ func (f *WinfspFS) Unlink(p string) int {
 }
 
 func (f *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle uint64) int {
-	fmt.Printf("[log] (Write): path=%s fh=%d offset=%d len=%d - writing direct\n", path, file_handle, offset, len(buffer))
+	f.logger.Logf("[log] (Write): path=%s fh=%d offset=%d len=%d", path, file_handle, offset, len(buffer))
 
 	file, ok := f.GetHandle(file_handle)
 	if !ok {
@@ -48,7 +47,7 @@ func (f *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle u
 	defer file.mu.Unlock()
 
 	if err := f.client.WriteOffset(file.path, buffer, offset); err != nil {
-		fmt.Printf("[log] (Write): remote write error=%v path=%s fh=%d offset=%d len=%d\n", err, file.path, file_handle, offset, len(buffer))
+		f.logger.Errorf("[log] (Write): remote write error=%v path=%s fh=%d offset=%d len=%d", err, file.path, file_handle, offset, len(buffer))
 		return -fuse.EIO
 	}
 
@@ -61,14 +60,14 @@ func (f *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle u
 }
 
 func (f *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
-	fmt.Printf("[log] (Create): path=%s flags=%#o mode=%#o\n", path, flags, mode)
+	f.logger.Logf("[log] (Create): path=%s flags=%#o mode=%#o", path, flags, mode)
 
 	if strings.HasSuffix(path, "/") && path != "/" {
 		path = strings.TrimSuffix(path, "/")
 	}
 
 	if err := f.client.Create(path); err != nil {
-		fmt.Printf("[log] (Create): remote write failed path=%s err=%v\n", path, err)
+		f.logger.Errorf("[log] (Create): remote write failed path=%s err=%v", path, err)
 		if os.IsPermission(err) {
 			return -fuse.EACCES, 0
 		}
@@ -80,6 +79,6 @@ func (f *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
 		h = f.NewHandle(path, casters.FileInfoCast(fi))
 	}
 
-	fmt.Printf("[log] (Create): returning handle=%d path=%s flags=%#o mode=%#o\n", h, path, flags, mode)
+	f.logger.Logf("[log] (Create): returning handle=%d path=%s flags=%#o mode=%#o", h, path, flags, mode)
 	return 0, h
 }

@@ -11,17 +11,20 @@ import (
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
+	"github.com/mimic/internal/core/logger"
 	"github.com/mimic/internal/fs/platform/linux/entries"
 	"github.com/mimic/internal/interfaces"
 )
 
 type FuseFS struct {
 	client interfaces.WebClient
+	logger logger.FullLogger
 }
 
-func New(wc interfaces.WebClient) *FuseFS {
+func New(wc interfaces.WebClient, logger logger.FullLogger) *FuseFS {
 	return &FuseFS{
 		client: wc,
+		logger: logger,
 	}
 }
 
@@ -103,6 +106,6 @@ func (f *FuseFS) Unmount() error {
 }
 
 func (f *FuseFS) Root() (fs.Node, error) {
-	log.Println("Root called")
-	return entries.NewNode(f.client, "/"), nil
+	f.logger.Log("Root called")
+	return entries.NewNode(f.client, f.logger, "/"), nil
 }

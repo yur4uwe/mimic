@@ -1,11 +1,25 @@
 package casters
 
 import (
+	"net/url"
 	"os"
+	"path"
+	"strings"
 	"syscall"
 
 	"github.com/winfsp/cgofuse/fuse"
 )
+
+func NormalizePath(p string) (string, error) {
+	s, err := url.PathUnescape(p)
+	if err != nil {
+		return "", err
+	}
+
+	s = strings.ReplaceAll(s, "\\", "/")
+	s = path.Clean(s)
+	return s, nil
+}
 
 func TimeCast(t syscall.Filetime) fuse.Timespec {
 	nsec := t.Nanoseconds()

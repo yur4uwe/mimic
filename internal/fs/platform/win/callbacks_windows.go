@@ -1,7 +1,6 @@
 package win
 
 import (
-	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -45,8 +44,8 @@ func (f *WinfspFS) GetHandle(handle uint64) (*openedFile, bool) {
 	return of, true
 }
 
-func (f *WinfspFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
-	if path == "/" {
+func (f *WinfspFS) Getattr(p string, stat *fuse.Stat_t, fh uint64) int {
+	if p == "/" {
 		stat.Mode = fuse.S_IFDIR | 0o777
 		stat.Nlink = 2
 		stat.Size = 0
@@ -60,28 +59,33 @@ func (f *WinfspFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 		return 0
 	}
 
+	norm, err := casters.NormalizePath(p)
+	if err != nil {
+		f.logger.Errorf("[Getattr] Path normalize error for path=%s error=%v", p, err)
+		return -fuse.ENOENT
+	}
+
 	if fi, ok := f.GetHandle(fh); ^uint64(0) != fh && ok {
 		*stat = *fi.stat
 
-		fmt.Printf("[log] (Getattr): found handle path=%s fh=%d mode=%#o size=%d\n", path, fh, stat.Mode, stat.Size)
+		f.logger.Logf("[Getattr] found handle path=%s fh=%d mode=%#o size=%d", norm, fh, stat.Mode, stat.Size)
 		return 0
 	}
 
-	file, err := f.client.Stat(path)
+	file, err := f.client.Stat(norm)
 	if err != nil {
-		fmt.Printf("[log] (Getattr): Stat error for path=%s error=%v\n", path, err)
+		f.logger.Errorf("[Getattr] Stat error for path=%s error=%v", norm, err)
 		return -fuse.ENOENT
 	}
 
 	*stat = *casters.FileInfoCast(file)
 
-	fmt.Printf("[log] (Getattr): path=%s has fh=%t mode=%#o size=%d\n", path, fh^(^uint64(0)) == 0, stat.Mode, stat.Size)
+	f.logger.Logf("[Getattr] path=%s has fh=%t mode=%#o size=%d", norm, fh^(^uint64(0)) == 0, stat.Mode, stat.Size)
 
 	return 0
 }
 
 func (f *WinfspFS) Open(path string, flags int) (int, uint64) {
-
 	fi, err := f.client.Stat(path)
 	if err != nil {
 		return -fuse.EIO, 0
@@ -93,13 +97,13 @@ func (f *WinfspFS) Open(path string, flags int) (int, uint64) {
 
 	handle := f.NewHandle(path, casters.FileInfoCast(fi))
 
-	fmt.Printf("[log] (Open): path=%s flags=%d handle=%d\n", path, flags, handle)
+	f.logger.Logf("[Open] path=%s flags=%d handle=%d", path, flags, handle)
 
 	return 0, handle
 }
 
 func (f *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle uint64) int {
-	fmt.Printf("[log] (Read): path=%s offset=%d fh=%d\n", path, offset, file_handle)
+	f.logger.Logf("[Read] path=%s offset=%d fh=%d", path, offset, file_handle)
 
 	file, ok := f.GetHandle(file_handle)
 	if !ok {
@@ -128,7 +132,7 @@ func (f *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle ui
 }
 
 func (f *WinfspFS) Rename(oldPath string, newPath string) int {
-	fmt.Printf("[log] (Rename): from=%s to=%s\n", oldPath, newPath)
+	f.logger.Logf("[Rename] from=%s to=%s", oldPath, newPath)
 
 	err := f.client.Rename(oldPath, newPath)
 	if err != nil {
@@ -139,13 +143,13 @@ func (f *WinfspFS) Rename(oldPath string, newPath string) int {
 }
 
 func (f *WinfspFS) Release(path string, file_handle uint64) int {
-	fmt.Printf("[log] (Release): path=%s handle=%d\n", path, file_handle)
+	f.logger.Logf("[Release] path=%s handle=%d", path, file_handle)
 	f.handles.Delete(file_handle)
 	return 0
 }
 
 func (f *WinfspFS) Utimens(path string, times []fuse.Timespec) int {
-	fmt.Printf("[log] (Utimens): path=%s times=%#v\n", path, times)
+	f.logger.Logf("[Utimens] path=%s times=%#v", path, times)
 	if strings.HasSuffix(path, "/") && path != "/" {
 		path = strings.TrimSuffix(path, "/")
 	}

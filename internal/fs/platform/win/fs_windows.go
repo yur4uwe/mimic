@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/mimic/internal/core/logger"
 	"github.com/mimic/internal/interfaces"
 	"github.com/winfsp/cgofuse/fuse"
 )
@@ -12,12 +13,14 @@ type WinfspFS struct {
 	fuse.FileSystemBase
 	client     interfaces.WebClient
 	handles    sync.Map // map[uint64]*FileHandle
+	logger     logger.FullLogger
 	nextHandle uint64
 }
 
-func New(webdavClient interfaces.WebClient) *WinfspFS {
+func New(webdavClient interfaces.WebClient, logger logger.FullLogger) *WinfspFS {
 	return &WinfspFS{
 		client: webdavClient,
+		logger: logger,
 	}
 }
 
