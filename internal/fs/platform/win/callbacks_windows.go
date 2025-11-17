@@ -74,7 +74,6 @@ func (f *WinfspFS) Getattr(p string, stat *fuse.Stat_t, fh uint64) int {
 
 	file, err := f.client.Stat(norm)
 	if err != nil {
-		f.logger.Errorf("[Getattr] Stat error for path=%s error=%v", norm, err)
 		return -fuse.ENOENT
 	}
 

@@ -52,9 +52,7 @@ retry:
 }
 
 func (w *WebdavClient) ReadDir(name string) ([]os.FileInfo, error) {
-	clean := filepath.Clean(name) + "/"
-
-	if children, ok := w.cache.GetChildren(clean); ok && children != nil {
+	if children, ok := w.cache.GetChildren(name + "/"); ok && children != nil {
 		return children, nil
 	}
 
@@ -194,9 +192,7 @@ func (w *WebdavClient) Remove(name string) error {
 }
 
 func (w *WebdavClient) Mkdir(name string, mode os.FileMode) error {
-	clean := filepath.Clean(name) + "/"
-
-	if err := w.client.Mkdir(clean, mode); err != nil {
+	if err := w.client.Mkdir(name+"/", mode); err != nil {
 		return err
 	}
 
@@ -206,11 +202,10 @@ func (w *WebdavClient) Mkdir(name string, mode os.FileMode) error {
 }
 
 func (w *WebdavClient) Rmdir(name string) error {
-	clean := filepath.Clean(name) + "/"
-	if err := w.client.RemoveAll(clean); err != nil {
+	if err := w.client.RemoveAll(name + "/"); err != nil {
 		return err
 	}
-	w.invalidatePath(clean, true)
+	w.invalidatePath(name+"/", true)
 	return nil
 }
 
@@ -300,7 +295,6 @@ func (w *WebdavClient) invalidatePath(name string, isDir bool) {
 	if name == "" {
 		return
 	}
-	name = filepath.Clean(name)
 
 	if isDir {
 		// ensure trailing slash so children keys (if stored that way) match
