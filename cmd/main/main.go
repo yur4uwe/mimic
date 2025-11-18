@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mimic/internal/core/cache"
 	"github.com/mimic/internal/core/logger"
 	"github.com/mimic/internal/core/wrappers"
 	"github.com/mimic/internal/fs"
@@ -31,7 +32,7 @@ func main() {
 	ttlPtr = flag.DurationP("ttl", "t", time.Minute, "cache TTL")
 	maxEntriesPtr = flag.IntP("max-entries", "m", 1000, "cache max entries")
 	verbosePtr = flag.BoolP("verbose", "v", false, "enable verbose logging")
-	logOutputs = *flag.StringSliceP("l", "l", []string{}, "log outputs: stdout, stderr, or file paths (repeatable or CSV)")
+	logOutputs = *flag.StringSliceP("log", "l", []string{}, "log outputs: stdout, stderr, or txt file paths")
 
 	flag.Usage = usage
 	flag.Parse()
@@ -79,8 +80,9 @@ func main() {
 	}
 
 	logger := logger.New(verbose, logOutputs)
+	cache := cache.NewNodeCache(ttl, maxEntries)
 
-	webdavClient := wrappers.NewWebdavClient(client, ttl, maxEntries)
+	webdavClient := wrappers.NewWebdavClient(client, cache)
 	filesystem := fs.New(webdavClient, logger)
 
 	if err := filesystem.Mount(mountpoint, []string{}); err != nil {

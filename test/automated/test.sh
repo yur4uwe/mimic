@@ -64,7 +64,7 @@ cleanup() {
                "$MOUNT"/test_dir 2>/dev/null || true
     fi
 }
-trap cleanup EXIT
+# trap cleanup EXIT
 
 echo "$(timestamp) Starting automated FUSE smoke tests for mount: $MOUNT"
 

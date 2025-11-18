@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/mimic/internal/core/cache"
 	"github.com/studio-b12/gowebdav"
@@ -21,13 +19,10 @@ type WebdavClient struct {
 
 const streamThreshold = 4 * 1024 * 1024 // 4 MB
 
-func NewWebdavClient(client *gowebdav.Client, ttl time.Duration, maxEntries int) *WebdavClient {
+func NewWebdavClient(client *gowebdav.Client, cache *cache.NodeCache) *WebdavClient {
 	return &WebdavClient{
 		client: client,
-		cache: cache.NewNodeCache(
-			ttl,
-			maxEntries,
-		),
+		cache:  cache,
 	}
 }
 
@@ -94,7 +89,7 @@ func (w *WebdavClient) commit(name string, data []byte) error {
 		}
 	}
 
-	w.invalidatePath(name, false)
+	w.cache.Invalidate(name)
 
 	return nil
 }
@@ -175,7 +170,6 @@ func (w *WebdavClient) WriteOffset(name string, data []byte, offset int64) error
 	return w.commit(name, merged)
 }
 
-// Create creates a new file with provided data (empty).
 func (w *WebdavClient) Create(name string) error {
 	if strings.HasSuffix(name, "/") {
 		return &os.PathError{Op: "create", Path: name, Err: os.ErrInvalid}
@@ -184,40 +178,24 @@ func (w *WebdavClient) Create(name string) error {
 }
 
 func (w *WebdavClient) Remove(name string) error {
-	if err := w.client.Remove(name); err != nil {
-		return err
-	}
-	w.invalidatePath(name, false)
-	return nil
+	defer w.cache.Invalidate(name)
+	return w.client.Remove(name)
 }
 
 func (w *WebdavClient) Mkdir(name string, mode os.FileMode) error {
-	if err := w.client.Mkdir(name+"/", mode); err != nil {
-		return err
-	}
-
-	w.cache.Invalidate(name)
-
-	return nil
+	defer w.cache.Invalidate(name)
+	return w.client.Mkdir(name+"/", mode)
 }
 
 func (w *WebdavClient) Rmdir(name string) error {
-	if err := w.client.RemoveAll(name + "/"); err != nil {
-		return err
-	}
-	w.invalidatePath(name+"/", true)
-	return nil
+	defer w.cache.InvalidateTree(name + "/")
+	return w.client.RemoveAll(name + "/")
 }
 
 func (w *WebdavClient) Rename(oldname, newname string) error {
-	if err := w.client.Rename(oldname, newname, true); err != nil {
-		return err
-	}
-
-	w.invalidatePath(oldname, true)
-	w.invalidatePath(newname, true)
-
-	return nil
+	defer w.cache.InvalidateTree(oldname)
+	defer w.cache.InvalidateTree(newname)
+	return w.client.Rename(oldname, newname, true)
 }
 
 // Truncate resizes the remote file to `size`.
@@ -226,6 +204,7 @@ func (w *WebdavClient) Rename(oldname, newname string) error {
 //   - if shrinking: read range [0,size) (prefer ReadStreamRange) and PUT that slice
 //   - if extending: read whole file (or available prefix), append zero bytes to requested size and PUT
 func (w *WebdavClient) Truncate(name string, size int64) error {
+	defer w.cache.Invalidate(name)
 	// normalize
 	if strings.HasSuffix(name, "/") && name != "/" {
 		name = strings.TrimSuffix(name, "/")
@@ -286,31 +265,4 @@ func (w *WebdavClient) Truncate(name string, size int64) error {
 	copy(buf, existing)
 	// rest is zeroed by default
 	return w.commit(name, buf)
-}
-
-// invalidatePath invalidates the entry and its parent.
-// If isDir==true it also invalidates the whole subtree.
-func (w *WebdavClient) invalidatePath(name string, isDir bool) {
-	// normalize to stable form
-	if name == "" {
-		return
-	}
-
-	if isDir {
-		// ensure trailing slash so children keys (if stored that way) match
-		if !strings.HasSuffix(name, "/") {
-			name = name + "/"
-		}
-		w.cache.InvalidateTree(name) // invalidate subtree
-		w.cache.Invalidate(name)     // invalidate dir entry itself
-	} else {
-		w.cache.Invalidate(name) // invalidate file entry
-	}
-
-	// invalidate parent listing so directory listings refresh
-	parent := filepath.Dir(name)
-	if parent == "." || parent == "" {
-		parent = "/"
-	}
-	w.cache.Invalidate(parent)
 }

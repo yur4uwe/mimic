@@ -3,7 +3,7 @@ package cache
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -39,7 +39,7 @@ func (c *NodeCache) Summary(maxKeys int) string {
 	total := 0
 	keys := make([]string, 0, 8)
 
-	c.entries.Range(func(k, v interface{}) bool {
+	c.entries.Range(func(k, v any) bool {
 		total++
 		if maxKeys > 0 && len(keys) < maxKeys {
 			if ks, ok := k.(string); ok {
@@ -62,7 +62,54 @@ func (c *NodeCache) Format(f fmt.State, verb rune) {
 	switch verb {
 	case 'v':
 		if f.Flag('+') || f.Flag('#') {
-			fmt.Fprint(f, c.Summary(0))
+			var b strings.Builder
+			fmt.Fprintf(&b, "NodeCache{entries=%d, ttl=%s, maxEntries=%d}\n", func() int {
+				cnt := 0
+				c.entries.Range(func(_, _ interface{}) bool { cnt++; return true })
+				return cnt
+			}(), c.ttl, c.maxEntries)
+
+			c.entries.Range(func(k, v interface{}) bool {
+				key, _ := k.(string)
+				fmt.Fprintf(&b, "Key: %s\n", key)
+
+				entry, ok := v.(*CacheEntry)
+				if !ok || entry == nil {
+					fmt.Fprintln(&b, "  <invalid or nil entry>")
+					return true
+				}
+
+				fmt.Fprintf(&b, "  IsDir: %v\n", entry.IsDir)
+				fmt.Fprintf(&b, "  ExpiresAt: %s\n", entry.ExpiresAt.Format(time.RFC3339Nano))
+
+				if entry.Info != nil {
+					fmt.Fprintf(&b, "  Info: name=%q size=%d mode=%#o modtime=%s isDir=%v\n",
+						entry.Info.Name(), entry.Info.Size(), entry.Info.Mode(), entry.Info.ModTime().Format(time.RFC3339Nano), entry.Info.IsDir())
+				} else {
+					fmt.Fprintln(&b, "  Info: <nil>")
+				}
+
+				if entry.Children == nil {
+					fmt.Fprintln(&b, "  Children: <nil>")
+				} else {
+					fmt.Fprint(&b, "  Children: [")
+					for i, ch := range entry.Children {
+						if i > 0 {
+							fmt.Fprint(&b, ", ")
+						}
+						if ch == nil {
+							fmt.Fprint(&b, "<nil>")
+						} else {
+							fmt.Fprintf(&b, "%q", ch.Name())
+						}
+					}
+					fmt.Fprintln(&b, "]")
+				}
+
+				return true
+			})
+
+			fmt.Fprint(f, b.String())
 			return
 		}
 		fmt.Fprint(f, c.String())
@@ -165,19 +212,18 @@ func (c *NodeCache) Invalidate(p string) {
 	if p == "" {
 		return
 	}
-	p = filepath.Clean(p)
 
 	c.entries.Delete(p)
 
-	if !strings.HasSuffix(p, string(os.PathSeparator)) {
-		c.entries.Delete(p + string(os.PathSeparator))
+	if !strings.HasSuffix(p, "/") {
+		c.entries.Delete(p + "/")
 	}
 
-	parent := filepath.Dir(p)
+	parent := path.Dir(p)
 	if parent != p {
 		c.entries.Delete(parent)
-		if !strings.HasSuffix(parent, string(os.PathSeparator)) {
-			c.entries.Delete(parent + string(os.PathSeparator))
+		if !strings.HasSuffix(parent, "/") {
+			c.entries.Delete(parent + "/")
 		}
 	}
 }
