@@ -96,54 +96,36 @@ func (w *WebdavClient) commit(name string, data []byte) error {
 
 // fetch reads up to 'upto' bytes from the start of the file.
 // If upto <= 0 it reads the whole file. Tries ranged stream read first, falls back to full read.
-func (w *WebdavClient) fetch(name string, upto int64) ([]byte, error) {
+func (w *WebdavClient) fetch(name string) ([]byte, error) {
 	// normalize path
 	if strings.HasSuffix(name, "/") && name != "/" {
 		name = strings.TrimSuffix(name, "/")
 	}
 
-	// read range when requested and supported
-	if upto > 0 {
-		if rc, err := w.client.ReadStreamRange(name, 0, upto); err == nil {
-			defer rc.Close()
-			data, err := io.ReadAll(rc)
-			if err != nil {
-				return nil, err
-			}
-			// Ensure returned slice length <= upto
-			if int64(len(data)) > upto {
-				return data[:upto], nil
-			}
-			return data, nil
-		}
-		// fallback to full read and then slice
-		all, err := w.client.Read(name)
+	// Always read the whole file (prefer streaming), then return a prefix if requested.
+	if rc, err := w.client.ReadStream(name); err == nil {
+		defer rc.Close()
+		data, err := io.ReadAll(rc)
 		if err != nil {
 			return nil, err
 		}
-		if int64(len(all)) > upto {
-			return all[:upto], nil
-		}
-		return all, nil
+		return data, nil
 	}
 
-	// upto <= 0 -> read whole file (try stream then Read)
-	if rc, err := w.client.ReadStream(name); err == nil {
-		defer rc.Close()
-		return io.ReadAll(rc)
+	all, err := w.client.Read(name)
+	if err != nil {
+		return nil, err
 	}
-
-	return w.client.Read(name)
+	return all, nil
 }
 
 func (w *WebdavClient) Write(name string, data []byte) error {
 	return w.commit(name, data)
 }
 
-// WriteOffset merges incoming data at offset with existing content and commits via commit.
 func (w *WebdavClient) WriteOffset(name string, data []byte, offset int64) error {
 	// fetch existing prefix up to offset
-	existing, err := w.fetch(name, offset)
+	existing, err := w.fetch(name)
 	if err != nil {
 		// if file doesn't exist and offset == 0 we can create new
 		if os.IsNotExist(err) && offset == 0 {
@@ -229,7 +211,7 @@ func (w *WebdavClient) Truncate(name string, size int64) error {
 	// shrink
 	if int64(cur) > size {
 		// try to fetch exact prefix up to size
-		data, err := w.fetch(name, size)
+		data, err := w.fetch(name)
 		if err != nil {
 			return err
 		}
@@ -246,7 +228,7 @@ func (w *WebdavClient) Truncate(name string, size int64) error {
 	}
 
 	// extend: fetch whole existing content then pad zeros
-	existing, err := w.fetch(name, 0)
+	existing, err := w.fetch(name)
 	if err != nil {
 		// if not exists and size > 0 create zero-filled
 		if os.IsNotExist(err) {

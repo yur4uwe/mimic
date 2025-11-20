@@ -112,6 +112,10 @@ func (f *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle ui
 		return -fuse.EIO
 	}
 
+	if !file.flags.ReadAllowed() {
+		return -fuse.EACCES
+	}
+
 	if offset >= file.size {
 		return 0 // EOF
 	}

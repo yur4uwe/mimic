@@ -5,8 +5,8 @@ import "os"
 type OpenFlag uint32
 
 func (f OpenFlag) WriteAllowed() bool {
-	// write allowed unless open is explicitly read-only
-	return uint32(f)&uint32(os.O_RDONLY) == 0
+	// write allowed if O_WRONLY or O_RDWR is set
+	return (uint32(f)&uint32(os.O_WRONLY) != 0) || (uint32(f)&uint32(os.O_RDWR) != 0)
 }
 
 func (f OpenFlag) ReadAllowed() bool {

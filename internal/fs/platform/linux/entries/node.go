@@ -211,6 +211,12 @@ func (n *Node) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 		return nil, syscall.Errno(syscall.ENOENT)
 	}
 
+	if flags.Create() {
+		if err := n.wc.Create(n.path); err != nil {
+			return nil, err
+		}
+	}
+
 	handle := &Handle{path: n.path, wc: n.wc, logger: n.logger}
 
 	return handle, nil

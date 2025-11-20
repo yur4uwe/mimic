@@ -45,6 +45,10 @@ func (h *Handle) Attr(ctx context.Context, a *fuse.Attr) error {
 }
 
 func (h *Handle) ReadAll(ctx context.Context) ([]byte, error) {
+	if !h.flags.ReadAllowed() {
+		return nil, syscall.Errno(syscall.EACCES)
+	}
+
 	data, err := h.wc.Read(h.path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -56,6 +60,10 @@ func (h *Handle) ReadAll(ctx context.Context) ([]byte, error) {
 }
 
 func (h *Handle) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
+	if !h.flags.WriteAllowed() {
+		return syscall.Errno(syscall.EACCES)
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -73,6 +81,10 @@ func (h *Handle) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.W
 }
 
 func (h *Handle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
+	if !h.flags.WriteAllowed() {
+		return syscall.Errno(syscall.EACCES)
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -102,14 +114,15 @@ func (h *Handle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
 }
 
 func (h *Handle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
-	return h.Fsync(ctx, &fuse.FsyncRequest{})
+	return h.Fsync(ctx, &fuse.FsyncRequest{
+		Handle: req.Handle,
+	})
 }
 
 func (h *Handle) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
-	if err := h.Fsync(ctx, &fuse.FsyncRequest{}); err != nil {
-		return err
-	}
-	return nil
+	return h.Fsync(ctx, &fuse.FsyncRequest{
+		Handle: req.Handle,
+	})
 }
 
 func (h *Handle) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {

@@ -16,6 +16,15 @@ func (f *WinfspFS) Truncate(p string, size int64, fh uint64) int {
 		p = strings.TrimSuffix(p, "/")
 	}
 
+	file, ok := f.GetHandle(fh)
+	if !ok {
+		return -fuse.EIO
+	}
+
+	if !file.flags.WriteAllowed() {
+		return -fuse.EACCES
+	}
+
 	err := f.client.Truncate(p, size)
 	if err != nil {
 		return -fuse.EIO
@@ -42,6 +51,10 @@ func (f *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle u
 	file, ok := f.GetHandle(file_handle)
 	if !ok {
 		return -fuse.EIO
+	}
+
+	if !file.flags.WriteAllowed() {
+		return -fuse.EACCES
 	}
 
 	file.mu.Lock()
