@@ -36,14 +36,11 @@ func makeFI(name string, isDir bool, size int64) os.FileInfo {
 	}
 }
 
-// dumpAndFail prints cache state using both String() and the %#v formatter,
-// then fails the test with the provided formatted message.
-func dumpAndFail(t *testing.T, c *cache.NodeCache, format string, args ...interface{}) {
+func dumpAndFail(t *testing.T, c *cache.NodeCache, format string, args ...any) {
 	t.Helper()
 	msg := fmt.Sprintf(format, args...)
-	// include both the concise String() and the detailed %#v output
-	t.Fatalf("%s\n\nCACHE STRING:\n%s\n\nCACHE FORMAT (%%#v):\n%s\n",
-		msg, c.String(), fmt.Sprintf("%#v", c))
+	t.Fatalf("%s\n\nCACHE FORMAT (%%#v):\n%s\n",
+		msg, fmt.Sprintf("%#v", c))
 }
 
 func TestSetGetAndChildren(t *testing.T) {
@@ -61,7 +58,6 @@ func TestSetGetAndChildren(t *testing.T) {
 		dumpAndFail(t, c, "unexpected info name: %q", got.Info.Name())
 	}
 
-	// test children
 	child1 := makeFI("a", false, 1)
 	child2 := makeFI("b", true, 0)
 	c.SetChildren("/dir", []os.FileInfo{child1, child2})
@@ -80,12 +76,10 @@ func TestExpiration(t *testing.T) {
 	fi := makeFI("tmp", false, 1)
 	c.Set("/tmp", c.NewEntry(fi))
 
-	// immediately present
 	if _, ok := c.Get("/tmp"); !ok {
 		dumpAndFail(t, c, "entry should exist immediately after set")
 	}
 
-	// wait for TTL to expire
 	time.Sleep(80 * time.Millisecond)
 
 	if _, ok := c.Get("/tmp"); ok {
@@ -94,13 +88,12 @@ func TestExpiration(t *testing.T) {
 }
 
 func TestInvalidateAndParentRemoval(t *testing.T) {
-	c := cache.NewNodeCache(1*time.Second, 100)
+	c := cache.NewNodeCache(time.Second, 100)
 
 	fi := makeFI("child", false, 1)
 	c.Set("/a/b", c.NewEntry(fi))
 	c.Set("/a", c.NewEntry(makeFI("a", true, 0)))
 
-	// invalidate child; Invalidate deletes the path and attempts to delete parent entries
 	c.Invalidate("/a/b")
 
 	if _, ok := c.Get("/a/b"); ok {
@@ -112,7 +105,7 @@ func TestInvalidateAndParentRemoval(t *testing.T) {
 }
 
 func TestInvalidateTree(t *testing.T) {
-	c := cache.NewNodeCache(1*time.Second, 100)
+	c := cache.NewNodeCache(time.Second, 100)
 
 	c.Set("/x/y", c.NewEntry(makeFI("y", true, 0)))
 	c.Set("/x/y/z", c.NewEntry(makeFI("z", false, 0)))
@@ -132,7 +125,7 @@ func TestInvalidateTree(t *testing.T) {
 }
 
 func TestSummaryIncludesKeys(t *testing.T) {
-	c := cache.NewNodeCache(1*time.Second, 100)
+	c := cache.NewNodeCache(time.Second, 100)
 	c.Set("/k1", c.NewEntry(makeFI("k1", false, 0)))
 	c.Set("/k2", c.NewEntry(makeFI("k2", false, 0)))
 
@@ -141,6 +134,5 @@ func TestSummaryIncludesKeys(t *testing.T) {
 		dumpAndFail(t, c, "summary did not include expected keys: %s", s)
 	}
 
-	// String() must not panic and should call Summary
 	_ = c.String()
 }
