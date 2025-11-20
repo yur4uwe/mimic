@@ -81,10 +81,6 @@ func (h *Handle) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.W
 }
 
 func (h *Handle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
-	if !h.flags.WriteAllowed() {
-		return syscall.Errno(syscall.EACCES)
-	}
-
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -119,10 +115,37 @@ func (h *Handle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 	})
 }
 
+// Release flushes buffered segments (if any) before closing the handle.
 func (h *Handle) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
-	return h.Fsync(ctx, &fuse.FsyncRequest{
-		Handle: req.Handle,
-	})
+	if !h.flags.WriteAllowed() {
+		return syscall.Errno(syscall.EACCES)
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if !h.dirty || len(h.segments) == 0 {
+		return nil
+	}
+
+	base, err := h.wc.Read(h.path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		base = []byte{}
+	}
+
+	merged := helpers.MergeSegmentsInto(base, h.segments)
+
+	h.logger.Logf("Release: flushing %s (len=%d)", h.path, len(merged))
+	if err := h.wc.Write(h.path, merged); err != nil {
+		return err
+	}
+
+	h.segments = nil
+	h.dirty = false
+	return nil
 }
 
 func (h *Handle) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {

@@ -199,19 +199,23 @@ func (n *Node) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse
 }
 
 func (n *Node) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
-	f, err := n.wc.Stat(n.path)
-	if !strings.Contains(err.Error(), "PROPFIND") {
-		return nil, errors.New("Server errors")
-	}
-
 	flags := flags.OpenFlag(uint32(req.OpenFlags))
 	n.logger.Logf("Open called for path: %s, with flags: %d", n.path, flags)
 
-	if checks.IsNilInterface(f) && !flags.Create() {
-		return nil, syscall.Errno(syscall.ENOENT)
-	}
-
+	// ensure we only call Create() when requested and honor O_EXCL (exclusive create)
 	if flags.Create() {
+		// If O_EXCL is set, fail if the file already exists.
+		if flags.Exclusive() {
+			if _, err := n.wc.Stat(n.path); err == nil {
+				// file exists -> EEXIST
+				return nil, syscall.EEXIST
+			} else if !os.IsNotExist(err) {
+				// unexpected stat error -> propagate
+				return nil, err
+			}
+		}
+
+		// perform create (file did not exist or O_EXCL not requested)
 		if err := n.wc.Create(n.path); err != nil {
 			return nil, err
 		}

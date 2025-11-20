@@ -63,7 +63,23 @@ jobs:
           CC: x86_64-w64-mingw32-gcc
           CGO_CFLAGS: -I${{ env.WINFSP_INCLUDE }}
           CGO_LDFLAGS: -L${{ env.WINFSP_LIB }} -lwinfsp-x64
-        run: make windows
+        run: go build -v ./cmd/main/main.go
+
+  test:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.23.4'
+
+      - name: Download modules
+        shell: pwsh
+        run: go mod download
 
       - name: Test
         shell: pwsh

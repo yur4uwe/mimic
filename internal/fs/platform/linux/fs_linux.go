@@ -5,8 +5,8 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 
 	"bazil.org/fuse"
@@ -19,6 +19,14 @@ import (
 type FuseFS struct {
 	client interfaces.WebClient
 	logger logger.FullLogger
+
+	// runtime mount state:
+	mu         sync.Mutex
+	mountpoint string
+	lockFile   *os.File
+	conn       *fuse.Conn
+	serveErr   chan error
+	mounted    bool
 }
 
 func New(wc interfaces.WebClient, logger logger.FullLogger) *FuseFS {
@@ -49,13 +57,22 @@ func unlockMountpoint(f *os.File) {
 	_ = f.Close()
 }
 
+// Mount creates the FUSE mount and starts fs.Serve in the background.
+// It returns once the mount and serve goroutine are started. Call Unmount()
+// to stop serving and clean up.
 func (f *FuseFS) Mount(mountpoint string, mflags []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.mounted {
+		return fmt.Errorf("already mounted at %q", f.mountpoint)
+	}
+
 	// acquire lock to prevent concurrent mounts on the same directory
 	lockFile, err := lockMountpoint(mountpoint)
 	if err != nil {
 		return fmt.Errorf("cannot lock mountpoint %q: %w", mountpoint, err)
 	}
-	defer unlockMountpoint(lockFile)
 
 	c, err := fuse.Mount(
 		mountpoint,
@@ -63,45 +80,70 @@ func (f *FuseFS) Mount(mountpoint string, mflags []string) error {
 		fuse.Subtype("mimicfs"),
 	)
 	if err != nil {
+		_ = lockFile.Close()
 		return fmt.Errorf("fuse mount failed: %w", err)
 	}
-	// ensure connection closed on exit
-	defer c.Close()
 
 	serveErr := make(chan error, 1)
 	go func() {
 		serveErr <- fs.Serve(c, f)
 	}()
 
+	// store runtime state for Unmount
+	f.mountpoint = mountpoint
+	f.lockFile = lockFile
+	f.conn = c
+	f.serveErr = serveErr
+	f.mounted = true
+
 	fmt.Println("Mounted Fuse on", mountpoint)
+	return nil
+}
 
-	// wait for interrupt/termination
-	sigcatcher := make(chan os.Signal, 1)
-	signal.Notify(sigcatcher, syscall.SIGINT, syscall.SIGTERM)
-	<-sigcatcher
+// Unmount stops serving, unmounts the filesystem and releases resources.
+// It is safe to call multiple times.
+func (f *FuseFS) Unmount() error {
+	f.mu.Lock()
+	// capture state to operate on while unlocked for potentially blocking ops
+	mounted := f.mounted
+	mp := f.mountpoint
+	lockFile := f.lockFile
+	conn := f.conn
+	serveErr := f.serveErr
 
-	// begin shutdown: ask kernel to unmount
-	fmt.Println("Unmounting", mountpoint)
-	if err := fuse.Unmount(mountpoint); err != nil {
+	f.mounted = false
+	f.mountpoint = ""
+	f.lockFile = nil
+	f.conn = nil
+	f.serveErr = nil
+	f.mu.Unlock()
+
+	if !mounted {
+		return nil
+	}
+
+	if err := fuse.Unmount(mp); err != nil {
 		// Unmount can fail when processes keep files open. Try a lazy unmount fallback,
 		// and log the error so operator can take manual action (fuser/kill).
 		log.Printf("fuse.Unmount error: %v", err)
-		// best-effort attempt with fusermount (may not exist on all systems)
-		if ex := exec.Command("fusermount3", "-uz", mountpoint).Run(); ex != nil {
+		if ex := exec.Command("fusermount3", "-uz", mp).Run(); ex != nil {
 			log.Printf("fusermount3 -uz failed: %v", ex)
 		}
 	}
 
-	_ = c.Close()
-
-	if err := <-serveErr; err != nil {
-		log.Printf("fs.Serve returned error: %v", err)
+	if conn != nil {
+		_ = conn.Close()
 	}
 
-	return nil
-}
+	if serveErr != nil {
+		if err := <-serveErr; err != nil {
+			log.Printf("fs.Serve returned error: %v", err)
+		}
+	}
 
-func (f *FuseFS) Unmount() error {
+	unlockMountpoint(lockFile)
+
+	fmt.Println("Unmounted", mp)
 	return nil
 }
 

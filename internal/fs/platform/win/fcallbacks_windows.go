@@ -1,6 +1,7 @@
 package win
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -22,6 +23,7 @@ func (f *WinfspFS) Truncate(p string, size int64, fh uint64) int {
 	}
 
 	if !file.flags.WriteAllowed() {
+		fmt.Println("Truncate forbidden")
 		return -fuse.EACCES
 	}
 
@@ -54,6 +56,7 @@ func (f *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle u
 	}
 
 	if !file.flags.WriteAllowed() {
+		fmt.Println("Write forbidden")
 		return -fuse.EACCES
 	}
 
@@ -104,45 +107,45 @@ func (f *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
 }
 
 // Release should flush buffered segments (if any) to remote before closing.
-func (f *WinfspFS) Release(path string, file_handle uint64) int {
+func (f *WinfspFS) Release(path string, file_handle uint64) (errc int) {
 	f.logger.Logf("[Release] path=%s handle=%d", path, file_handle)
 
 	fh, ok := f.GetHandle(file_handle)
 	if !ok {
-		return 0
+		goto cleanup
 	}
 
-	// flush if dirty
+	if !fh.flags.WriteAllowed() {
+		goto cleanup
+	}
+
 	fh.mu.Lock()
+	defer fh.mu.Unlock()
 	if fh.dirty && len(fh.segments) > 0 {
-		// read base (may not exist)
 		base, err := f.client.Read(fh.path)
 		if err != nil {
 			// if not exist, treat base as empty
 			if os.IsNotExist(err) {
 				base = []byte{}
 			} else {
-				fh.mu.Unlock()
-				f.handles.Delete(file_handle)
-				return -fuse.EIO
+				errc = -fuse.EIO
+				goto cleanup
 			}
 		}
 
 		merged := helpers.MergeSegmentsInto(base, fh.segments)
+		fh.size = int64(len(merged))
 
 		if err := f.client.Write(fh.path, merged); err != nil {
-			fh.mu.Unlock()
-			f.handles.Delete(file_handle)
 			f.logger.Errorf("[Release] write flush error=%v path=%s", err, fh.path)
-			return -fuse.EIO
+			errc = -fuse.EIO
+			goto cleanup
 		}
-
-		// clear buffers
-		fh.segments = nil
-		fh.dirty = false
 	}
-	fh.mu.Unlock()
 
+cleanup:
+	fh.segments = nil
+	fh.dirty = false
 	f.handles.Delete(file_handle)
-	return 0
+	return errc
 }

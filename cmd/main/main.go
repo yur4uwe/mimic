@@ -85,6 +85,7 @@ func main() {
 	webdavClient := wrappers.NewWebdavClient(client, cache)
 	filesystem := fs.New(webdavClient, logger)
 
+	defer filesystem.Unmount()
 	if err := filesystem.Mount(mountpoint, []string{}); err != nil {
 		logger.Errorf("Mount failed: %v", err)
 		os.Exit(1)

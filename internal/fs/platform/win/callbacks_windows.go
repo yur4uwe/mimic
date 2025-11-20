@@ -2,11 +2,13 @@ package win
 
 import (
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 
 	"github.com/mimic/internal/core/casters"
+	"github.com/mimic/internal/core/checks"
 	"github.com/mimic/internal/core/flags"
 	"github.com/winfsp/cgofuse/fuse"
 )
@@ -70,6 +72,7 @@ func (f *WinfspFS) Getattr(p string, stat *fuse.Stat_t, fh uint64) int {
 
 	if fi, ok := f.GetHandle(fh); ^uint64(0) != fh && ok {
 		*stat = *fi.stat
+		stat.Size = fi.size
 
 		f.logger.Logf("[Getattr] found handle path=%s fh=%d mode=%#o size=%d", norm, fh, stat.Mode, stat.Size)
 		return 0
@@ -82,19 +85,28 @@ func (f *WinfspFS) Getattr(p string, stat *fuse.Stat_t, fh uint64) int {
 
 	*stat = *casters.FileInfoCast(file)
 
-	f.logger.Logf("[Getattr] path=%s has fh=%t mode=%#o size=%d", norm, fh^(^uint64(0)) == 0, stat.Mode, stat.Size)
+	f.logger.Logf("[Getattr] path=%s has fh=%t mode=%#o size=%d", norm, fh^(^uint64(0)) == 0, file.Mode(), file.Size())
 
 	return 0
 }
 
-func (f *WinfspFS) Open(path string, flags int) (int, uint64) {
+func (f *WinfspFS) Open(path string, oflags int) (int, uint64) {
+	flags := flags.OpenFlag(uint32(oflags))
+
 	fi, err := f.client.Stat(path)
-	if err != nil {
-		return -fuse.EIO, 0
+
+	if checks.IsNilInterface(fi) {
+		err = os.ErrNotExist
 	}
 
-	if fi.IsDir() {
-		return -fuse.EISDIR, 0
+	if flags.Create() && os.IsNotExist(err) {
+		if err := f.client.Create(path); err != nil {
+			return -fuse.EIO, 0
+		}
+	}
+
+	if flags.Exclusive() && !os.IsNotExist(err) {
+		return -fuse.EEXIST, 0
 	}
 
 	handle := f.NewHandle(path, casters.FileInfoCast(fi), uint32(flags))

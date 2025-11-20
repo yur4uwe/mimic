@@ -25,7 +25,22 @@ jobs:
         run: go mod download
 
       - name: Build
-        run: make linux
+        run: go build -v ./cmd/main/main.go
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.23.4'
+
+      - name: Download modules
+        run: go mod download
 
       - name: Test
         run: go test -v ./...
