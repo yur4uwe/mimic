@@ -17,6 +17,7 @@ import (
 	"bazil.org/fuse/fs"
 	"github.com/mimic/internal/core/casters"
 	"github.com/mimic/internal/core/checks"
+	"github.com/mimic/internal/core/flags"
 	"github.com/mimic/internal/core/logger"
 	"github.com/mimic/internal/interfaces"
 )
@@ -198,7 +199,17 @@ func (n *Node) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse
 }
 
 func (n *Node) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
-	n.logger.Logf("Open called for path:", n.path)
+	f, err := n.wc.Stat(n.path)
+	if !strings.Contains(err.Error(), "PROPFIND") {
+		return nil, errors.New("Server errors")
+	}
+
+	flags := flags.OpenFlag(uint32(req.OpenFlags))
+	n.logger.Logf("Open called for path: %s, with flags: %d", n.path, flags)
+
+	if checks.IsNilInterface(f) && !flags.Create() {
+		return nil, syscall.Errno(syscall.ENOENT)
+	}
 
 	handle := &Handle{path: n.path, wc: n.wc, logger: n.logger}
 

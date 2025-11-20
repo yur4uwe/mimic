@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/mimic/internal/core/casters"
+	"github.com/mimic/internal/core/flags"
 	"github.com/winfsp/cgofuse/fuse"
 )
 
@@ -17,18 +18,20 @@ const (
 
 type openedFile struct {
 	path  string
-	flags int
+	flags flags.OpenFlag
 	size  int64
 	stat  *fuse.Stat_t
 
-	mu sync.Mutex
+	mu       sync.Mutex
+	segments map[int64][]byte
+	dirty    bool
 }
 
-func (f *WinfspFS) NewHandle(path string, stat *fuse.Stat_t) uint64 {
+func (f *WinfspFS) NewHandle(path string, stat *fuse.Stat_t, oflags uint32) uint64 {
 	file_handle := atomic.AddUint64(&f.nextHandle, 1)
 	f.handles.Store(file_handle, &openedFile{
 		path:  path,
-		flags: int(stat.Mode),
+		flags: flags.OpenFlag(oflags),
 		size:  stat.Size,
 		stat:  stat,
 	})
@@ -94,7 +97,7 @@ func (f *WinfspFS) Open(path string, flags int) (int, uint64) {
 		return -fuse.EISDIR, 0
 	}
 
-	handle := f.NewHandle(path, casters.FileInfoCast(fi))
+	handle := f.NewHandle(path, casters.FileInfoCast(fi), uint32(flags))
 
 	f.logger.Logf("[Open] path=%s flags=%d handle=%d", path, flags, handle)
 
@@ -138,12 +141,6 @@ func (f *WinfspFS) Rename(oldPath string, newPath string) int {
 		return -fuse.EIO
 	}
 
-	return 0
-}
-
-func (f *WinfspFS) Release(path string, file_handle uint64) int {
-	f.logger.Logf("[Release] path=%s handle=%d", path, file_handle)
-	f.handles.Delete(file_handle)
 	return 0
 }
 

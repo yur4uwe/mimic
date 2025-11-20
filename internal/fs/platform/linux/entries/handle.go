@@ -11,6 +11,8 @@ import (
 
 	"bazil.org/fuse"
 	"github.com/mimic/internal/core/casters"
+	"github.com/mimic/internal/core/flags"
+	"github.com/mimic/internal/core/helpers"
 	"github.com/mimic/internal/core/logger"
 	"github.com/mimic/internal/interfaces"
 )
@@ -19,6 +21,7 @@ type Handle struct {
 	path   string
 	wc     interfaces.WebClient
 	logger logger.FullLogger
+	flags  flags.OpenFlag
 
 	mu       sync.Mutex
 	segments map[int64][]byte
@@ -69,25 +72,6 @@ func (h *Handle) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.W
 	return nil
 }
 
-func (h *Handle) mergeSegmentsInto(base []byte) []byte {
-	maxEnd := int64(len(base))
-	for off, seg := range h.segments {
-		end := off + int64(len(seg))
-		if end > maxEnd {
-			maxEnd = end
-		}
-	}
-
-	merged := make([]byte, maxEnd)
-	copy(merged, base)
-
-	for off, seg := range h.segments {
-		copy(merged[off:], seg)
-	}
-
-	return merged
-}
-
 func (h *Handle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -104,7 +88,7 @@ func (h *Handle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
 		base = []byte{}
 	}
 
-	merged := h.mergeSegmentsInto(base)
+	merged := helpers.MergeSegmentsInto(base, h.segments)
 
 	h.logger.Logf("Fsync called to flush: %s", h.path)
 

@@ -23,7 +23,7 @@ func (f *WinfspFS) Opendir(path string) (int, uint64) {
 		return -fuse.EIO, 0
 	}
 
-	handle := f.NewHandle(path, casters.FileInfoCast(d))
+	handle := f.NewHandle(path, casters.FileInfoCast(d), uint32(os.O_RDONLY))
 	f.logger.Logf("[log] (Opendir): returning handle=%d path=%s", handle, path)
 	return 0, handle
 }

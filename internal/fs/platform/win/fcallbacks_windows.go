@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/mimic/internal/core/casters"
+	"github.com/mimic/internal/core/helpers"
 	"github.com/winfsp/cgofuse/fuse"
 )
 
@@ -46,11 +47,17 @@ func (f *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle u
 	file.mu.Lock()
 	defer file.mu.Unlock()
 
-	if err := f.client.WriteOffset(file.path, buffer, offset); err != nil {
-		f.logger.Errorf("[log] (Write): remote write error=%v path=%s fh=%d offset=%d len=%d", err, file.path, file_handle, offset, len(buffer))
-		return -fuse.EIO
+	if file.segments == nil {
+		file.segments = make(map[int64][]byte)
 	}
 
+	// copy buffer to avoid referencing caller memory
+	data := make([]byte, len(buffer))
+	copy(data, buffer)
+	file.segments[offset] = data
+	file.dirty = true
+
+	// update in-memory size if we extended beyond current known size
 	end := offset + int64(len(buffer))
 	if end > file.size {
 		file.size = end
@@ -76,9 +83,53 @@ func (f *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
 
 	h := uint64(0)
 	if fi, err := f.client.Stat(path); err == nil {
-		h = f.NewHandle(path, casters.FileInfoCast(fi))
+		h = f.NewHandle(path, casters.FileInfoCast(fi), uint32(flags))
 	}
 
 	f.logger.Logf("[log] (Create): returning handle=%d path=%s flags=%#o mode=%#o", h, path, flags, mode)
 	return 0, h
+}
+
+// Release should flush buffered segments (if any) to remote before closing.
+func (f *WinfspFS) Release(path string, file_handle uint64) int {
+	f.logger.Logf("[Release] path=%s handle=%d", path, file_handle)
+
+	fh, ok := f.GetHandle(file_handle)
+	if !ok {
+		return 0
+	}
+
+	// flush if dirty
+	fh.mu.Lock()
+	if fh.dirty && len(fh.segments) > 0 {
+		// read base (may not exist)
+		base, err := f.client.Read(fh.path)
+		if err != nil {
+			// if not exist, treat base as empty
+			if os.IsNotExist(err) {
+				base = []byte{}
+			} else {
+				fh.mu.Unlock()
+				f.handles.Delete(file_handle)
+				return -fuse.EIO
+			}
+		}
+
+		merged := helpers.MergeSegmentsInto(base, fh.segments)
+
+		if err := f.client.Write(fh.path, merged); err != nil {
+			fh.mu.Unlock()
+			f.handles.Delete(file_handle)
+			f.logger.Errorf("[Release] write flush error=%v path=%s", err, fh.path)
+			return -fuse.EIO
+		}
+
+		// clear buffers
+		fh.segments = nil
+		fh.dirty = false
+	}
+	fh.mu.Unlock()
+
+	f.handles.Delete(file_handle)
+	return 0
 }
