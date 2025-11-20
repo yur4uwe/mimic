@@ -30,6 +30,7 @@ func main() {
 	fmt.Println("Mountpoint is accessible.")
 
 	assert("File operations", autochecks.CheckFileOps(mount))
+	// Should think about creating locks for read and write to eliminate this race condition
 	assert("Large write", autochecks.CheckLargeWrite(mount))
 	assert("Open flags", autochecks.CheckOpenFlags(mount))
 	assert("Truncate", autochecks.CheckTruncate(mount))
