@@ -11,7 +11,7 @@ import (
 )
 
 func (f *WinfspFS) Truncate(p string, size int64, fh uint64) int {
-	f.logger.Logf("[log] (Truncate): path=%s fh=%d size=%d", p, fh, size)
+	f.logger.Logf("[Truncate]: path=%s fh=%d size=%d", p, fh, size)
 
 	if strings.HasSuffix(p, "/") && p != "/" {
 		p = strings.TrimSuffix(p, "/")
@@ -36,7 +36,7 @@ func (f *WinfspFS) Truncate(p string, size int64, fh uint64) int {
 }
 
 func (f *WinfspFS) Unlink(p string) int {
-	f.logger.Logf("[log] (Unlink): path=%s", p)
+	f.logger.Logf("[Unlink]: path=%s", p)
 	if strings.HasSuffix(p, "/") && p != "/" {
 		p = strings.TrimSuffix(p, "/")
 	}
@@ -48,7 +48,7 @@ func (f *WinfspFS) Unlink(p string) int {
 }
 
 func (f *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle uint64) int {
-	f.logger.Logf("[log] (Write): path=%s fh=%d offset=%d len=%d", path, file_handle, offset, len(buffer))
+	f.logger.Logf("[Write]: path=%s fh=%d offset=%d len=%d", path, file_handle, offset, len(buffer))
 
 	file, ok := f.GetHandle(file_handle)
 	if !ok {
@@ -90,7 +90,7 @@ func (f *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
 	}
 
 	if err := f.client.Create(path); err != nil {
-		f.logger.Errorf("[log] (Create): remote write failed path=%s err=%v", path, err)
+		f.logger.Errorf("[Create]: remote write failed path=%s err=%v", path, err)
 		if os.IsPermission(err) {
 			return -fuse.EACCES, 0
 		}
@@ -102,7 +102,7 @@ func (f *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
 		h = f.NewHandle(path, casters.FileInfoCast(fi), uint32(flags))
 	}
 
-	f.logger.Logf("[log] (Create): returning handle=%d path=%s flags=%#o mode=%#o", h, path, flags, mode)
+	f.logger.Logf("[Create]: returning handle=%d path=%s flags=%#o mode=%#o", h, path, flags, mode)
 	return 0, h
 }
 
@@ -134,12 +134,20 @@ func (f *WinfspFS) Release(path string, file_handle uint64) (errc int) {
 		}
 
 		merged := helpers.MergeSegmentsInto(base, fh.segments)
-		fh.size = int64(len(merged))
+		fmt.Println("Merged Length:", len(merged))
 
 		if err := f.client.Write(fh.path, merged); err != nil {
 			f.logger.Errorf("[Release] write flush error=%v path=%s", err, fh.path)
 			errc = -fuse.EIO
 			goto cleanup
+		}
+
+		if fi, err := f.client.Stat(fh.path); err == nil {
+			if int64(len(merged)) != fi.Size() {
+				f.logger.Errorf("[Release] size mismatch after write path=%s want=%d got=%d", fh.path, len(merged), fi.Size())
+				errc = -fuse.EIO
+				goto cleanup
+			}
 		}
 	}
 

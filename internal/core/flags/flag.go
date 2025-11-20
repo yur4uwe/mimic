@@ -1,6 +1,9 @@
 package flags
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 type OpenFlag uint32
 
@@ -28,4 +31,28 @@ func (f OpenFlag) Truncate() bool {
 
 func (f OpenFlag) Exclusive() bool {
 	return uint32(f)&uint32(os.O_EXCL) != 0
+}
+
+func (f OpenFlag) String() string {
+	flags := []string{}
+	if f.ReadAllowed() && f.WriteAllowed() {
+		flags = append(flags, "O_RDWR")
+	} else if f.ReadAllowed() {
+		flags = append(flags, "O_RDONLY")
+	} else if f.WriteAllowed() {
+		flags = append(flags, "O_WRONLY")
+	}
+	if f.Append() {
+		flags = append(flags, "O_APPEND")
+	}
+	if f.Create() {
+		flags = append(flags, "O_CREATE")
+	}
+	if f.Truncate() {
+		flags = append(flags, "O_TRUNC")
+	}
+	if f.Exclusive() {
+		flags = append(flags, "O_EXCL")
+	}
+	return strings.Join(flags, "|")
 }

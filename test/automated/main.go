@@ -33,7 +33,7 @@ func main() {
 	assert("Large write", autochecks.CheckLargeWrite(mount))
 	assert("Open flags", autochecks.CheckOpenFlags(mount))
 	assert("Truncate", autochecks.CheckTruncate(mount))
-	// assert("Concurrent append/read", autochecks.CheckConcurrentAppendRead(mount))
+	assert("Concurrent append/read", autochecks.CheckConcurrentAppendRead(mount))
 
 	fmt.Println("Unmounting...")
 }

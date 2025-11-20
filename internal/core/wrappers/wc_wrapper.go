@@ -2,6 +2,7 @@ package wrappers
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -28,11 +29,13 @@ func NewWebdavClient(client *gowebdav.Client, cache *cache.NodeCache) *WebdavCli
 
 func (w *WebdavClient) Stat(name string) (os.FileInfo, error) {
 	if fi, ok := w.cache.Get(name); ok {
+		fmt.Println("Cache hit")
 		return fi.Info, nil
 	}
 
 retry:
 	stat, err := w.client.Stat(name)
+	fmt.Println("Stat from wrapper:", stat)
 	if err != nil {
 		if !strings.HasSuffix(name, "/") && strings.Contains(err.Error(), "200") {
 			name += "/"

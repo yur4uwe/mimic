@@ -1,7 +1,6 @@
 package autochecks
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -59,6 +58,5 @@ func CheckFileOps(base string) error {
 	_ = os.RemoveAll(dir)
 
 	ensureAbsent(f)
-	fmt.Println("file ops OK")
 	return nil
 }

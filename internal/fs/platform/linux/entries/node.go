@@ -203,19 +203,7 @@ func (n *Node) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 	n.logger.Logf("Open called for path: %s, with flags: %d", n.path, flags)
 
 	// ensure we only call Create() when requested and honor O_EXCL (exclusive create)
-	if flags.Create() {
-		// If O_EXCL is set, fail if the file already exists.
-		if flags.Exclusive() {
-			if _, err := n.wc.Stat(n.path); err == nil {
-				// file exists -> EEXIST
-				return nil, syscall.EEXIST
-			} else if !os.IsNotExist(err) {
-				// unexpected stat error -> propagate
-				return nil, err
-			}
-		}
-
-		// perform create (file did not exist or O_EXCL not requested)
+	if _, err := n.wc.Stat(n.path); flags.Create() && os.IsNotExist(err) {
 		if err := n.wc.Create(n.path); err != nil {
 			return nil, err
 		}

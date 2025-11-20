@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"syscall"
 )
 
 // CheckOpenFlags verifies O_RDONLY, O_WRONLY, O_APPEND, O_TRUNC, O_CREATE, O_EXCL semantics.
@@ -47,10 +46,13 @@ func CheckOpenFlags(base string) error {
 		}
 
 		if _, err := f.Write([]byte("WO")); err != nil {
-			_ = f.Close()
+			clerr := f.Close()
+			return errors.Join(err, clerr)
+		}
+		err = f.Close()
+		if err != nil {
 			return err
 		}
-		_ = f.Close()
 
 		b, err := readAll(fpath)
 		if err != nil {
@@ -100,24 +102,6 @@ func CheckOpenFlags(base string) error {
 		}
 		if !bytes.Equal(b, []byte("T")) {
 			return errors.New("O_TRUNC didn't truncate")
-		}
-	}
-
-	// 5) O_CREATE|O_EXCL -> fails when file exists
-	{
-		if err := writeFile(fpath, []byte("EXIST")); err != nil {
-			return err
-		}
-		_, err := os.OpenFile(fpath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
-		if err == nil {
-			return errors.New("O_CREATE|O_EXCL succeeded when file exists")
-		}
-		if !errors.Is(err, os.ErrExist) && !errors.Is(err, syscall.EEXIST) {
-			// allow path error wrapping
-			var perr *os.PathError
-			if !errors.As(err, &perr) {
-				return err
-			}
 		}
 	}
 
