@@ -29,6 +29,7 @@ type Handle struct {
 }
 
 func (h *Handle) Attr(ctx context.Context, a *fuse.Attr) error {
+	h.logger.Logf("(Handle) [Attr] called for %s", h.path)
 	fi, err := h.wc.Stat(h.path)
 	if err != nil {
 		if os.IsNotExist(err) {

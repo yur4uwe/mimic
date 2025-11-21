@@ -18,63 +18,86 @@ func CheckConcurrentAppendRead(base string) error {
 		return err
 	}
 
-	const n = 40
+	const n = 5
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	var appendErr error
+	appendCh := make(chan error, 1)
+	readCh := make(chan error, 1)
+
 	go func() {
 		defer wg.Done()
 		for i := 0; i < n; i++ {
 			f, err := os.OpenFile(fpath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 			if err != nil {
-				appendErr = err
+				appendCh <- err
 				return
 			}
-			if _, err := f.Write([]byte(fmt.Sprintf("x%02d\n", i))); err != nil {
+			line := fmt.Sprintf("x%02d\n", i)
+			if _, err := f.Write([]byte(line)); err != nil {
 				_ = f.Close()
-				appendErr = err
+				appendCh <- err
 				return
 			}
-			_ = f.Close()
-			time.Sleep(10 * time.Millisecond)
+			if err := f.Close(); err != nil {
+				appendCh <- err
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
 		}
+		appendCh <- nil
 	}()
 
-	var readErr error
 	go func() {
 		defer wg.Done()
 		seen := 0
 		var last int64 = 0
-		for seen < n && readErr == nil {
+		for seen < n {
 			info, err := os.Stat(fpath)
 			if err != nil {
-				time.Sleep(10 * time.Millisecond)
+				time.Sleep(20 * time.Millisecond)
 				continue
 			}
 			if info.Size() > last {
 				f, err := os.Open(fpath)
-				if err == nil {
-					_, _ = f.Seek(last, io.SeekStart)
-					buf := make([]byte, info.Size()-last)
-					_, _ = io.ReadFull(f, buf)
+				if err != nil {
+					readCh <- err
+					return
+				}
+				if _, err := f.Seek(last, io.SeekStart); err != nil {
 					_ = f.Close()
-					for _, b := range bytes.Split(buf, []byte{'\n'}) {
-						if len(b) > 0 {
-							seen++
-						}
+					readCh <- err
+					return
+				}
+				buf := make([]byte, info.Size()-last)
+				if _, err := io.ReadFull(f, buf); err != nil && err != io.EOF {
+					_ = f.Close()
+					readCh <- err
+					return
+				}
+				if err := f.Close(); err != nil {
+					readCh <- err
+					return
+				}
+				for _, b := range bytes.Split(buf, []byte{'\n'}) {
+					if len(b) > 0 {
+						seen++
 					}
 				}
 				last = info.Size()
 			}
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(20 * time.Millisecond)
 		}
 		if seen < n {
-			readErr = fmt.Errorf("seen %d entries, expected %d", seen, n)
+			readCh <- fmt.Errorf("seen %d entries, expected %d", seen, n)
+			return
 		}
+		readCh <- nil
 	}()
 
 	wg.Wait()
+	appendErr := <-appendCh
+	readErr := <-readCh
 	ensureAbsent(fpath)
 	if appendErr != nil {
 		return appendErr

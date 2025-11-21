@@ -78,6 +78,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "webdav client: couldn't connect to the server:", err)
 		os.Exit(1)
 	}
+	fmt.Println("Server health check successful")
 
 	logger := logger.New(verbose, logOutputs)
 	cache := cache.NewNodeCache(ttl, maxEntries)

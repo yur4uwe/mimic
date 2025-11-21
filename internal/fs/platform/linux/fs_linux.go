@@ -5,9 +5,8 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"os/signal"
 	"sync"
-	"syscall"
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
@@ -23,9 +22,8 @@ type FuseFS struct {
 	// runtime mount state:
 	mu         sync.Mutex
 	mountpoint string
-	lockFile   *os.File
 	conn       *fuse.Conn
-	serveErr   chan error
+	serveErr   error
 	mounted    bool
 }
 
@@ -34,27 +32,6 @@ func New(wc interfaces.WebClient, logger logger.FullLogger) *FuseFS {
 		client: wc,
 		logger: logger,
 	}
-}
-
-func lockMountpoint(mountpoint string) (*os.File, error) {
-	lockPath := filepath.Join(mountpoint, ".mimic.lock")
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
-	if err != nil {
-		return nil, err
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("mountpoint busy or locked: %w", err)
-	}
-	return f, nil
-}
-
-func unlockMountpoint(f *os.File) {
-	if f == nil {
-		return
-	}
-	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	_ = f.Close()
 }
 
 // Mount creates the FUSE mount and starts fs.Serve in the background.
@@ -68,32 +45,34 @@ func (f *FuseFS) Mount(mountpoint string, mflags []string) error {
 		return fmt.Errorf("already mounted at %q", f.mountpoint)
 	}
 
-	// acquire lock to prevent concurrent mounts on the same directory
-	lockFile, err := lockMountpoint(mountpoint)
-	if err != nil {
-		return fmt.Errorf("cannot lock mountpoint %q: %w", mountpoint, err)
+	_, err := os.Stat(mountpoint)
+	if !os.IsNotExist(err) && err != nil {
+		return fmt.Errorf("cannot access mountpoint %q: %w", mountpoint, err)
 	}
 
+	fmt.Println("Mounting...")
 	c, err := fuse.Mount(
 		mountpoint,
 		fuse.FSName("mimic"),
 		fuse.Subtype("mimicfs"),
 	)
 	if err != nil {
-		_ = lockFile.Close()
 		return fmt.Errorf("fuse mount failed: %w", err)
 	}
+	fmt.Println("Mounted, starting server...")
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt)
 
-	serveErr := make(chan error, 1)
 	go func() {
-		serveErr <- fs.Serve(c, f)
+		fs.Serve(c, f)
 	}()
+
+	fmt.Println("Fuse is serving")
+	<-sigChan
 
 	// store runtime state for Unmount
 	f.mountpoint = mountpoint
-	f.lockFile = lockFile
 	f.conn = c
-	f.serveErr = serveErr
 	f.mounted = true
 
 	fmt.Println("Mounted Fuse on", mountpoint)
@@ -107,13 +86,11 @@ func (f *FuseFS) Unmount() error {
 	// capture state to operate on while unlocked for potentially blocking ops
 	mounted := f.mounted
 	mp := f.mountpoint
-	lockFile := f.lockFile
 	conn := f.conn
 	serveErr := f.serveErr
 
 	f.mounted = false
 	f.mountpoint = ""
-	f.lockFile = nil
 	f.conn = nil
 	f.serveErr = nil
 	f.mu.Unlock()
@@ -136,12 +113,8 @@ func (f *FuseFS) Unmount() error {
 	}
 
 	if serveErr != nil {
-		if err := <-serveErr; err != nil {
-			log.Printf("fs.Serve returned error: %v", err)
-		}
+		log.Printf("fs.Serve returned error: %v", serveErr)
 	}
-
-	unlockMountpoint(lockFile)
 
 	fmt.Println("Unmounted", mp)
 	return nil

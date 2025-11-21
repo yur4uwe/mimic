@@ -5,8 +5,8 @@ package entries
 import (
 	"context"
 	"errors"
+	"fmt"
 	"hash/crc32"
-	"log"
 	"os"
 	"path"
 	"strings"
@@ -37,7 +37,7 @@ func NewNode(wc interfaces.WebClient, logger logger.FullLogger, path string) *No
 }
 
 func (n *Node) Attr(ctx context.Context, a *fuse.Attr) error {
-	log.Println("Attr called for path:", n.path)
+	n.logger.Logf("[Attr] called for path: %s", n.path)
 
 	if n.path == "/" {
 		a.Mode = os.ModeDir | 0o755
@@ -63,13 +63,14 @@ func (n *Node) Attr(ctx context.Context, a *fuse.Attr) error {
 
 	attr.Inode = uint64(crc32.ChecksumIEEE([]byte(n.path)) + 1)
 
+	fmt.Printf("Attr: %+v\n", attr)
 	*a = *attr
 	return nil
 }
 
-func (n *Node) Lookup(ctx context.Context, name string) (fs.Node, error) {
-	childPath := path.Join(n.path, name)
-	n.logger.Logf("Lookup called for path: %s", childPath)
+func (n *Node) Lookup(ctx context.Context, req *fuse.LookupRequest, resp *fuse.LookupResponse) (fs.Node, error) {
+	childPath := path.Join(n.path, req.Name)
+	n.logger.Logf("[Lookup] called for path: %s", childPath)
 
 	fi, err := n.wc.Stat(childPath)
 	if err != nil {
@@ -80,15 +81,14 @@ func (n *Node) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		return nil, syscall.Errno(syscall.ENOENT)
 	}
 
-	if fi.IsDir() {
-		return &Node{wc: n.wc, path: childPath}, nil
-	}
+	resp.Attr = *casters.FileInfoCast(fi)
+	resp.Attr.Inode = uint64(crc32.ChecksumIEEE([]byte(childPath)) + 1)
 
-	return &Handle{path: childPath, logger: n.logger, wc: n.wc}, nil
+	return &Node{wc: n.wc, path: childPath, logger: n.logger}, nil
 }
 
 func (n *Node) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
-	n.logger.Logf("ReadDirAll called for path: %s", n.path)
+	n.logger.Logf("[ReadDirAll] called for path: %s", n.path)
 
 	infos, err := n.wc.ReadDir(n.path)
 	if err != nil {
@@ -127,7 +127,7 @@ func (n *Node) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 
 func (n *Node) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, error) {
 	newDirPath := path.Join(n.path, req.Name)
-	n.logger.Logf("Mkdir called for path: %s", newDirPath)
+	n.logger.Logf("[Mkdir] called for path: %s", newDirPath)
 	if err := n.wc.Mkdir(newDirPath, req.Mode); err != nil {
 		return nil, err
 	}
@@ -137,7 +137,7 @@ func (n *Node) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, erro
 
 func (n *Node) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
 	newFilePath := path.Join(n.path, req.Name)
-	n.logger.Logf("Create called for path: %s", newFilePath)
+	n.logger.Logf("[Create] called for path: %s", newFilePath)
 
 	if err := n.wc.Create(newFilePath); err != nil {
 		return nil, nil, err
@@ -150,7 +150,7 @@ func (n *Node) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.C
 
 func (n *Node) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 	targetPath := path.Join(n.path, req.Name)
-	n.logger.Logf("Remove called for path: %s", targetPath)
+	n.logger.Logf("[Remove] called for path: %s", targetPath)
 
 	if req.Dir {
 		if err := n.wc.Rmdir(targetPath); err != nil {

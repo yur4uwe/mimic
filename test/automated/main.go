@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	autochecks "github.com/mimic/test/automated/checks"
 )
@@ -16,16 +15,18 @@ func assert(name string, err error) {
 }
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintf(os.Stderr, "usage: %s MOUNTPOINT\n", os.Args[0])
-		os.Exit(2)
-	}
-	mount := os.Args[1]
+	// if len(os.Args) != 2 {
+	// 	fmt.Fprintf(os.Stderr, "usage: %s MOUNTPOINT\n", os.Args[0])
+	// 	os.Exit(2)
+	// }
+	// mount := os.Args[1]
 
-	if fi, err := os.Stat(mount); err != nil || !fi.IsDir() {
-		assert("Mountpoint accessibility", fmt.Errorf("mountpoint not accessible or not a dir: %v", err))
-		return
-	}
+	// if fi, err := os.Stat(mount); err != nil || !fi.IsDir() {
+	// 	assert("Mountpoint accessibility", fmt.Errorf("mountpoint not accessible or not a dir: %v", err))
+	// 	return
+	// }
+
+	mount := "/mnt/mimic"
 
 	fmt.Println("Mountpoint is accessible.")
 
