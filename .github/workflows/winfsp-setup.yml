@@ -1,0 +1,31 @@
+name: "WinFsp + MinGW setup"
+description: "Install WinFsp and MinGW and export WINFSP_INCLUDE / WINFSP_LIB"
+inputs: {}
+runs:
+  using: "composite"
+  steps:
+    - name: Install WinFsp and MinGW
+      shell: pwsh
+      run: |
+        choco install winfsp -y
+        choco install mingw -y
+        refreshenv
+
+        $inc = 'C:\PROGRA~2\WinFsp\inc\fuse'
+        $lib = 'C:\PROGRA~2\WinFsp\lib'
+
+        if (-not (Test-Path (Join-Path $inc 'fuse_common.h'))) {
+          Write-Host "Missing WinFsp header: fuse_common.h in $inc"
+          exit 1
+        }
+        if (-not (Test-Path (Join-Path $inc 'fuse.h'))) {
+          Write-Host "Missing WinFsp header: fuse.h in $inc"
+          exit 1
+        }
+        if (-not (Test-Path (Join-Path $lib 'winfsp-x64.lib'))) {
+          Write-Host "Missing WinFsp library: winfsp-x64.lib in $lib"
+          exit 1
+        }
+
+        Add-Content -Path $env:GITHUB_ENV -Value "WINFSP_INCLUDE=$inc"
+        Add-Content -Path $env:GITHUB_ENV -Value "WINFSP_LIB=$lib"

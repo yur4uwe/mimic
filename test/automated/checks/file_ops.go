@@ -7,9 +7,9 @@ import (
 
 // CheckFileOps covers create, append, mkdir, move, rename and remove.
 func CheckFileOps(base string) error {
-	f := join(base, "basic.txt")
-	dir := join(base, "test_dir")
-	renamed := join(base, "basic.renamed")
+	f := filepath.Join(base, "basic.txt")
+	dir := filepath.Join(base, "test_dir")
+	renamed := filepath.Join(base, "basic.renamed")
 
 	ensureAbsent(f)
 	ensureAbsent(renamed)

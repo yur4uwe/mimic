@@ -5,11 +5,12 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 // CheckOpenFlags verifies O_RDONLY, O_WRONLY, O_APPEND, O_TRUNC, O_CREATE, O_EXCL semantics.
 func CheckOpenFlags(base string) error {
-	fpath := join(base, "flags.dat")
+	fpath := filepath.Join(base, "flags.dat")
 
 	// baseline
 	if err := writeFile(fpath, []byte("BASE")); err != nil {

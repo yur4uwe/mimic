@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 )
 
 // CheckLargeWrite writes a 10 MiB file to validate large writes.
 func CheckLargeWrite(base string) error {
-	fpath := join(base, "big.bin")
+	fpath := filepath.Join(base, "big.bin")
 	ensureAbsent(fpath)
 
 	out, err := os.Create(fpath)

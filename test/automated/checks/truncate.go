@@ -2,11 +2,12 @@ package autochecks
 
 import (
 	"fmt"
+	"path/filepath"
 )
 
 // CheckTruncate verifies truncating down and up works.
 func CheckTruncate(base string) error {
-	fpath := join(base, "tfile")
+	fpath := filepath.Join(base, "tfile")
 	if err := writeFile(fpath, []byte("0123456789")); err != nil {
 		return err
 	}

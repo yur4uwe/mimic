@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
 
 // CheckConcurrentAppendRead performs concurrent appends and a reader tailing the file.
 func CheckConcurrentAppendRead(base string) error {
-	fpath := join(base, "stream.txt")
+	fpath := filepath.Join(base, "stream.txt")
 	ensureAbsent(fpath)
 	if err := writeFile(fpath, []byte{}); err != nil {
 		return err

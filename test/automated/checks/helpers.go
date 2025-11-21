@@ -3,7 +3,6 @@ package autochecks
 import (
 	"bytes"
 	"os"
-	"path/filepath"
 )
 
 func writeFile(path string, data []byte) error {
@@ -18,21 +17,8 @@ func ensureAbsent(path string) {
 	_ = os.RemoveAll(path)
 }
 
-func join(base, name string) string {
-	return filepath.Join(base, name)
-}
-
-func containsPrefix(b []byte, pref string) bool {
-	return bytes.HasPrefix(b, []byte(pref))
-}
-
 func containsSuffix(b []byte, suf string) bool {
 	return bytes.HasSuffix(b, []byte(suf))
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 func truncateFile(path string, size int64) error {

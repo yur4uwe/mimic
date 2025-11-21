@@ -13,39 +13,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install WinFsp and MinGW (for cgo)
-        shell: pwsh
-        run: |
-          choco install winfsp -y
-          choco install mingw -y
-          refreshenv
-
-          $inc = 'C:\PROGRA~2\WinFsp\inc\fuse'
-          $lib = 'C:\PROGRA~2\WinFsp\lib'
-
-          if (-not (Test-Path (Join-Path $inc 'fuse_common.h'))) {
-            Write-Host "Missing WinFsp header: fuse_common.h in $inc"
-            exit 1
-          } else {
-            Write-Host "Found WinFsp header: fuse_common.h"
-          }
-
-          if (-not (Test-Path (Join-Path $inc 'fuse.h'))) {
-            Write-Host "Missing WinFsp header: fuse.h in $inc"
-            exit 1
-          } else {
-            Write-Host "Found WinFsp header: fuse.h"
-          }
-
-          if (-not (Test-Path (Join-Path $lib 'winfsp-x64.lib'))) {
-            Write-Host "Missing WinFsp library: winfsp-x64.lib in $lib"
-            exit 1
-          } else {
-            Write-Host "Found WinFsp library: winfsp-x64.lib"
-          }
-
-          Add-Content -Path $env:GITHUB_ENV -Value "WINFSP_INCLUDE=$inc"
-          Add-Content -Path $env:GITHUB_ENV -Value "WINFSP_LIB=$lib"
+      - name: WinFsp & MinGW setup
+        uses: ./.github/actions/winfsp-setup
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -71,6 +40,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: WinFsp & MinGW setup
+        uses: ./.github/actions/winfsp-setup
 
       - name: Set up Go
         uses: actions/setup-go@v4
