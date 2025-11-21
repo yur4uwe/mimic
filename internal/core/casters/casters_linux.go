@@ -3,12 +3,14 @@ package casters
 import (
 	"os"
 	"syscall"
+	"time"
 
 	"bazil.org/fuse"
 )
 
 func FileInfoCast(f os.FileInfo) *fuse.Attr {
 	attr := &fuse.Attr{
+		Valid: time.Second,
 		Mode:  f.Mode(),
 		Size:  uint64(f.Size()),
 		Uid:   uint32(os.Getuid()),

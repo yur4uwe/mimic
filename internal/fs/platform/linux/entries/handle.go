@@ -28,6 +28,15 @@ type Handle struct {
 	dirty    bool
 }
 
+func NewHandle(wc interfaces.WebClient, logger logger.FullLogger, path string, flags flags.OpenFlag) *Handle {
+	return &Handle{
+		wc:     wc,
+		logger: logger,
+		flags:  flags,
+		path:   path,
+	}
+}
+
 func (h *Handle) Attr(ctx context.Context, a *fuse.Attr) error {
 	h.logger.Logf("(Handle) [Attr] called for %s", h.path)
 	fi, err := h.wc.Stat(h.path)
@@ -46,7 +55,9 @@ func (h *Handle) Attr(ctx context.Context, a *fuse.Attr) error {
 }
 
 func (h *Handle) ReadAll(ctx context.Context) ([]byte, error) {
+	h.logger.Logf("(Handle) [ReadAll] called for %s", h.path)
 	if !h.flags.ReadAllowed() {
+		h.logger.Logf("(Handle) [ReadAll] access denied for %s, flag state: %+v", h.path, h.flags)
 		return nil, syscall.Errno(syscall.EACCES)
 	}
 
@@ -60,8 +71,41 @@ func (h *Handle) ReadAll(ctx context.Context) ([]byte, error) {
 	return data, nil
 }
 
+func (h *Handle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
+	h.logger.Logf("(Handle) [Read] called for %s, offset: %d, size: %d", h.path, req.Offset, req.Size)
+	if !h.flags.ReadAllowed() {
+		h.logger.Logf("(Handle) [Read] access denied for %s, flag state: %+v", h.path, h.flags)
+		return syscall.Errno(syscall.EACCES)
+	}
+
+	data, err := h.wc.Read(h.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return syscall.Errno(syscall.ENOENT)
+		}
+		return err
+	}
+
+	if req.Offset >= int64(len(data)) {
+		resp.Data = []byte{}
+		return nil
+	}
+
+	if req.Offset+int64(req.Size) > int64(len(data)) {
+		req.Size = int(len(data) - int(req.Offset))
+	}
+
+	resp.Data = make([]byte, req.Size)
+
+	copy(resp.Data, data[req.Offset:req.Offset+int64(req.Size)])
+
+	return nil
+}
+
 func (h *Handle) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
+	h.logger.Logf("(Handle) [Write] called for %s, offset: %d, size: %d", h.path, req.Offset, len(req.Data))
 	if !h.flags.WriteAllowed() {
+		h.logger.Logf("(Handle) [Write] access denied for %s, flag state: %+v", h.path, h.flags)
 		return syscall.Errno(syscall.EACCES)
 	}
 
@@ -99,7 +143,7 @@ func (h *Handle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
 
 	merged := helpers.MergeSegmentsInto(base, h.segments)
 
-	h.logger.Logf("Fsync called to flush: %s", h.path)
+	h.logger.Logf("(Handle) [Fsync] called to flush: %s", h.path)
 
 	if err := h.wc.Write(h.path, merged); err != nil {
 		return err
@@ -119,6 +163,7 @@ func (h *Handle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 // Release flushes buffered segments (if any) before closing the handle.
 func (h *Handle) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
 	if !h.flags.WriteAllowed() {
+		h.logger.Logf("(Handle) [Release] write not allowed for %s, flag state: %+v", h.path, h.flags)
 		return syscall.Errno(syscall.EACCES)
 	}
 
@@ -150,7 +195,7 @@ func (h *Handle) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
 }
 
 func (h *Handle) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
-	h.logger.Logf("ReadDirAll called for %s", h.path)
+	h.logger.Logf("(Handle) [ReadDirAll] called for %s", h.path)
 
 	ents, err := h.wc.ReadDir(h.path)
 	if err != nil {
@@ -176,4 +221,8 @@ func (h *Handle) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	}
 
 	return dirents, nil
+}
+
+func (h *Handle) Poll(ctx context.Context, req *fuse.PollRequest, resp *fuse.PollResponse) error {
+	return syscall.Errno(syscall.ENOSYS)
 }

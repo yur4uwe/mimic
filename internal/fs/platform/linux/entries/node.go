@@ -5,7 +5,6 @@ package entries
 import (
 	"context"
 	"errors"
-	"fmt"
 	"hash/crc32"
 	"os"
 	"path"
@@ -63,13 +62,17 @@ func (n *Node) Attr(ctx context.Context, a *fuse.Attr) error {
 
 	attr.Inode = uint64(crc32.ChecksumIEEE([]byte(n.path)) + 1)
 
-	fmt.Printf("Attr: %+v\n", attr)
 	*a = *attr
 	return nil
 }
 
-func (n *Node) Lookup(ctx context.Context, req *fuse.LookupRequest, resp *fuse.LookupResponse) (fs.Node, error) {
-	childPath := path.Join(n.path, req.Name)
+func (n *Node) Access(ctx context.Context, req *fuse.AccessRequest) error {
+	n.logger.Logf("[Access] called for path: %s with mode: %d", n.path, req.Mask)
+	return nil
+}
+
+func (n *Node) Lookup(ctx context.Context, name string) (fs.Node, error) {
+	childPath := path.Join(n.path, name)
 	n.logger.Logf("[Lookup] called for path: %s", childPath)
 
 	fi, err := n.wc.Stat(childPath)
@@ -81,10 +84,11 @@ func (n *Node) Lookup(ctx context.Context, req *fuse.LookupRequest, resp *fuse.L
 		return nil, syscall.Errno(syscall.ENOENT)
 	}
 
-	resp.Attr = *casters.FileInfoCast(fi)
-	resp.Attr.Inode = uint64(crc32.ChecksumIEEE([]byte(childPath)) + 1)
+	return NewNode(n.wc, n.logger, childPath), nil
+}
 
-	return &Node{wc: n.wc, path: childPath, logger: n.logger}, nil
+func (n *Node) Poll(ctx context.Context, req *fuse.PollRequest, resp *fuse.PollResponse) error {
+	return syscall.Errno(syscall.ENOSYS)
 }
 
 func (n *Node) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
@@ -132,19 +136,20 @@ func (n *Node) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, erro
 		return nil, err
 	}
 
-	return &Node{wc: n.wc, logger: n.logger, path: newDirPath}, nil
+	return NewNode(n.wc, n.logger, newDirPath), nil
 }
 
 func (n *Node) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
 	newFilePath := path.Join(n.path, req.Name)
-	n.logger.Logf("[Create] called for path: %s", newFilePath)
+	oflags := flags.OpenFlag(uint32(req.Flags))
+	n.logger.Logf("[Create] called for path: %s, with flags: %v", newFilePath, oflags)
 
 	if err := n.wc.Create(newFilePath); err != nil {
 		return nil, nil, err
 	}
 
-	handle := &Handle{path: newFilePath, wc: n.wc, logger: n.logger}
-	node := &Node{wc: n.wc, logger: n.logger, path: newFilePath}
+	handle := NewHandle(n.wc, n.logger, newFilePath, oflags)
+	node := NewNode(n.wc, n.logger, newFilePath)
 	return node, handle, nil
 }
 
@@ -199,17 +204,16 @@ func (n *Node) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse
 }
 
 func (n *Node) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
-	flags := flags.OpenFlag(uint32(req.OpenFlags))
-	n.logger.Logf("Open called for path: %s, with flags: %d", n.path, flags)
+	flags := flags.OpenFlag(uint32(req.Flags))
+	n.logger.Logf("[Open] called for path: %s, with flags: %v", n.path, flags)
 
-	// ensure we only call Create() when requested and honor O_EXCL (exclusive create)
 	if _, err := n.wc.Stat(n.path); flags.Create() && os.IsNotExist(err) {
 		if err := n.wc.Create(n.path); err != nil {
 			return nil, err
 		}
 	}
 
-	handle := &Handle{path: n.path, wc: n.wc, logger: n.logger}
+	handle := NewHandle(n.wc, n.logger, n.path, flags)
 
 	return handle, nil
 }
