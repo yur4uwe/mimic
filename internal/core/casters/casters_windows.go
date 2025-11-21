@@ -5,7 +5,6 @@ import (
 	"os"
 	"path"
 	"strings"
-	"syscall"
 
 	"github.com/winfsp/cgofuse/fuse"
 )
@@ -19,14 +18,6 @@ func NormalizePath(p string) (string, error) {
 	s = strings.ReplaceAll(s, "\\", "/")
 	s = path.Clean(s)
 	return s, nil
-}
-
-func TimeCast(t syscall.Filetime) fuse.Timespec {
-	nsec := t.Nanoseconds()
-	return fuse.Timespec{
-		Sec:  nsec / 1e9,
-		Nsec: nsec % 1e9,
-	}
 }
 
 func FileInfoCast(f os.FileInfo) *fuse.Stat_t {
