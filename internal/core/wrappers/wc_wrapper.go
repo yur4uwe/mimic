@@ -2,7 +2,6 @@ package wrappers
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -29,7 +28,6 @@ func NewWebdavClient(client *gowebdav.Client, cache *cache.NodeCache) *WebdavCli
 
 func (w *WebdavClient) Stat(name string) (os.FileInfo, error) {
 	if fi, ok := w.cache.Get(name); ok {
-		fmt.Println("Cache hit")
 		return fi.Info, nil
 	}
 

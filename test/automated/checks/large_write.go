@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 )
 
 // CheckLargeWrite writes a 10 MiB file to validate large writes.
@@ -26,9 +25,6 @@ func CheckLargeWrite(base string) error {
 		}
 	}
 	out.Close()
-
-	// untangle race conditions
-	time.Sleep(5 * time.Second)
 
 	info, err := os.Stat(fpath)
 	if err != nil {

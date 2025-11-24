@@ -37,12 +37,12 @@ func New(wc interfaces.WebClient, logger logger.FullLogger) *FuseFS {
 // Mount creates the FUSE mount and starts fs.Serve in the background.
 // It returns once the mount and serve goroutine are started. Call Unmount()
 // to stop serving and clean up.
-func (f *FuseFS) Mount(mountpoint string, mflags []string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+func (fs *FuseFS) Mount(mountpoint string, mflags []string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
 
-	if f.mounted {
-		return fmt.Errorf("already mounted at %q", f.mountpoint)
+	if fs.mounted {
+		return fmt.Errorf("already mounted at %q", fs.mountpoint)
 	}
 
 	_, err := os.Stat(mountpoint)
@@ -64,16 +64,16 @@ func (f *FuseFS) Mount(mountpoint string, mflags []string) error {
 	signal.Notify(sigChan, os.Interrupt)
 
 	go func() {
-		fs.Serve(c, f)
+		fs.Serve(c, fs)
 	}()
 
 	fmt.Println("Fuse is serving")
 	<-sigChan
 
 	// store runtime state for Unmount
-	f.mountpoint = mountpoint
-	f.conn = c
-	f.mounted = true
+	fs.mountpoint = mountpoint
+	fs.conn = c
+	fs.mounted = true
 
 	fmt.Println("Mounted Fuse on", mountpoint)
 	return nil
@@ -81,19 +81,19 @@ func (f *FuseFS) Mount(mountpoint string, mflags []string) error {
 
 // Unmount stops serving, unmounts the filesystem and releases resources.
 // It is safe to call multiple times.
-func (f *FuseFS) Unmount() error {
-	f.mu.Lock()
+func (fs *FuseFS) Unmount() error {
+	fs.mu.Lock()
 	// capture state to operate on while unlocked for potentially blocking ops
-	mounted := f.mounted
-	mp := f.mountpoint
-	conn := f.conn
-	serveErr := f.serveErr
+	mounted := fs.mounted
+	mp := fs.mountpoint
+	conn := fs.conn
+	serveErr := fs.serveErr
 
-	f.mounted = false
-	f.mountpoint = ""
-	f.conn = nil
-	f.serveErr = nil
-	f.mu.Unlock()
+	fs.mounted = false
+	fs.mountpoint = ""
+	fs.conn = nil
+	fs.serveErr = nil
+	fs.mu.Unlock()
 
 	if !mounted {
 		return nil
@@ -120,7 +120,7 @@ func (f *FuseFS) Unmount() error {
 	return nil
 }
 
-func (f *FuseFS) Root() (fs.Node, error) {
-	f.logger.Log("Root called")
-	return entries.NewNode(f.client, f.logger, "/"), nil
+func (fs *FuseFS) Root() (fs.Node, error) {
+	fs.logger.Log("Root called")
+	return entries.NewNode(fs.client, fs.logger, "/"), nil
 }

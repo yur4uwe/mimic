@@ -10,14 +10,14 @@ import (
 	"github.com/winfsp/cgofuse/fuse"
 )
 
-func (f *WinfspFS) Truncate(p string, size int64, fh uint64) int {
-	f.logger.Logf("[Truncate]: path=%s fh=%d size=%d", p, fh, size)
+func (fs *WinfspFS) Truncate(p string, size int64, fh uint64) int {
+	fs.logger.Logf("[Truncate]: path=%s fh=%d size=%d", p, fh, size)
 
 	if strings.HasSuffix(p, "/") && p != "/" {
 		p = strings.TrimSuffix(p, "/")
 	}
 
-	file, ok := f.GetHandle(fh)
+	file, ok := fs.GetHandle(fh)
 	if !ok {
 		return -fuse.EIO
 	}
@@ -27,7 +27,7 @@ func (f *WinfspFS) Truncate(p string, size int64, fh uint64) int {
 		return -fuse.EACCES
 	}
 
-	err := f.client.Truncate(p, size)
+	err := fs.client.Truncate(p, size)
 	if err != nil {
 		return -fuse.EIO
 	}
@@ -35,22 +35,22 @@ func (f *WinfspFS) Truncate(p string, size int64, fh uint64) int {
 	return 0
 }
 
-func (f *WinfspFS) Unlink(p string) int {
-	f.logger.Logf("[Unlink]: path=%s", p)
+func (fs *WinfspFS) Unlink(p string) int {
+	fs.logger.Logf("[Unlink]: path=%s", p)
 	if strings.HasSuffix(p, "/") && p != "/" {
 		p = strings.TrimSuffix(p, "/")
 	}
-	if err := f.client.Remove(p); err != nil {
+	if err := fs.client.Remove(p); err != nil {
 		return -fuse.EIO
 	}
 
 	return 0
 }
 
-func (f *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle uint64) int {
-	f.logger.Logf("[Write]: path=%s fh=%d offset=%d len=%d", path, file_handle, offset, len(buffer))
+func (fs *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle uint64) int {
+	fs.logger.Logf("[Write]: path=%s fh=%d offset=%d len=%d", path, file_handle, offset, len(buffer))
 
-	file, ok := f.GetHandle(file_handle)
+	file, ok := fs.GetHandle(file_handle)
 	if !ok {
 		return -fuse.EIO
 	}
@@ -60,37 +60,24 @@ func (f *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle u
 		return -fuse.EACCES
 	}
 
-	file.mu.Lock()
-	defer file.mu.Unlock()
-
-	if file.segments == nil {
-		file.segments = make(map[int64][]byte)
-	}
-
-	// copy buffer to avoid referencing caller memory
-	data := make([]byte, len(buffer))
-	copy(data, buffer)
-	file.segments[offset] = data
-	file.dirty = true
-
-	// update in-memory size if we extended beyond current known size
-	end := offset + int64(len(buffer))
-	if end > file.size {
-		file.size = end
+	file.Lock()
+	defer file.Unlock()
+	if err := fs.client.WriteOffset(path, buffer, offset); err != nil {
+		return -fuse.EIO
 	}
 
 	return len(buffer)
 }
 
-func (f *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
-	f.logger.Logf("[log] (Create): path=%s flags=%#o mode=%#o", path, flags, mode)
+func (fs *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
+	fs.logger.Logf("[log] (Create): path=%s flags=%#o mode=%#o", path, flags, mode)
 
 	if strings.HasSuffix(path, "/") && path != "/" {
 		path = strings.TrimSuffix(path, "/")
 	}
 
-	if err := f.client.Create(path); err != nil {
-		f.logger.Errorf("[Create]: remote write failed path=%s err=%v", path, err)
+	if err := fs.client.Create(path); err != nil {
+		fs.logger.Errorf("[Create]: remote write failed path=%s err=%v", path, err)
 		if os.IsPermission(err) {
 			return -fuse.EACCES, 0
 		}
@@ -98,19 +85,19 @@ func (f *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
 	}
 
 	h := uint64(0)
-	if fi, err := f.client.Stat(path); err == nil {
-		h = f.NewHandle(path, casters.FileInfoCast(fi), uint32(flags))
+	if fi, err := fs.client.Stat(path); err == nil {
+		h = fs.NewHandle(path, casters.FileInfoCast(fi), uint32(flags))
 	}
 
-	f.logger.Logf("[Create]: returning handle=%d path=%s flags=%#o mode=%#o", h, path, flags, mode)
+	fs.logger.Logf("[Create]: returning handle=%d path=%s flags=%#o mode=%#o", h, path, flags, mode)
 	return 0, h
 }
 
 // Release should flush buffered segments (if any) to remote before closing.
-func (f *WinfspFS) Release(path string, file_handle uint64) (errc int) {
-	f.logger.Logf("[Release] path=%s handle=%d", path, file_handle)
+func (fs *WinfspFS) Release(path string, file_handle uint64) (errc int) {
+	fs.logger.Logf("[Release] path=%s handle=%d", path, file_handle)
 
-	fh, ok := f.GetHandle(file_handle)
+	fh, ok := fs.GetHandle(file_handle)
 	if !ok {
 		goto cleanup
 	}
@@ -122,7 +109,7 @@ func (f *WinfspFS) Release(path string, file_handle uint64) (errc int) {
 	fh.mu.Lock()
 	defer fh.mu.Unlock()
 	if fh.dirty && len(fh.segments) > 0 {
-		base, err := f.client.Read(fh.path)
+		base, err := fs.client.Read(fh.path)
 		if err != nil {
 			// if not exist, treat base as empty
 			if os.IsNotExist(err) {
@@ -136,15 +123,15 @@ func (f *WinfspFS) Release(path string, file_handle uint64) (errc int) {
 		merged := helpers.MergeSegmentsInto(base, fh.segments)
 		fmt.Println("Merged Length:", len(merged))
 
-		if err := f.client.Write(fh.path, merged); err != nil {
-			f.logger.Errorf("[Release] write flush error=%v path=%s", err, fh.path)
+		if err := fs.client.Write(fh.path, merged); err != nil {
+			fs.logger.Errorf("[Release] write flush error=%v path=%s", err, fh.path)
 			errc = -fuse.EIO
 			goto cleanup
 		}
 
-		if fi, err := f.client.Stat(fh.path); err == nil {
+		if fi, err := fs.client.Stat(fh.path); err == nil {
 			if int64(len(merged)) != fi.Size() {
-				f.logger.Errorf("[Release] size mismatch after write path=%s want=%d got=%d", fh.path, len(merged), fi.Size())
+				fs.logger.Errorf("[Release] size mismatch after write path=%s want=%d got=%d", fh.path, len(merged), fi.Size())
 				errc = -fuse.EIO
 				goto cleanup
 			}
@@ -154,6 +141,6 @@ func (f *WinfspFS) Release(path string, file_handle uint64) (errc int) {
 cleanup:
 	fh.segments = nil
 	fh.dirty = false
-	f.handles.Delete(file_handle)
+	fs.handles.Delete(file_handle)
 	return errc
 }
