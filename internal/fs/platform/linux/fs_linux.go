@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"bazil.org/fuse"
-	"bazil.org/fuse/fs"
+	fusefs "bazil.org/fuse/fs"
 	"github.com/mimic/internal/core/logger"
 	"github.com/mimic/internal/fs/platform/linux/entries"
 	"github.com/mimic/internal/interfaces"
@@ -64,7 +64,7 @@ func (fs *FuseFS) Mount(mountpoint string, mflags []string) error {
 	signal.Notify(sigChan, os.Interrupt)
 
 	go func() {
-		fs.Serve(c, fs)
+		fusefs.Serve(c, fs)
 	}()
 
 	fmt.Println("Fuse is serving")
@@ -120,7 +120,7 @@ func (fs *FuseFS) Unmount() error {
 	return nil
 }
 
-func (fs *FuseFS) Root() (fs.Node, error) {
+func (fs *FuseFS) Root() (fusefs.Node, error) {
 	fs.logger.Log("Root called")
 	return entries.NewNode(fs.client, fs.logger, "/"), nil
 }
