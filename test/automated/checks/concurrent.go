@@ -13,7 +13,7 @@ import (
 // CheckConcurrentAppendRead performs concurrent appends and a reader tailing the file.
 func CheckConcurrentAppendRead(base string) (retErr error) {
 	fpath := filepath.Join(base, "stream.txt")
-	ensureAbsent(fpath)
+	_ = os.RemoveAll(fpath)
 
 	const n = 5
 	var wg sync.WaitGroup
@@ -22,7 +22,7 @@ func CheckConcurrentAppendRead(base string) (retErr error) {
 
 	var appendErr, readErr error
 
-	if err := writeFile(fpath, []byte{}); err != nil {
+	if err := os.WriteFile(fpath, []byte{}, 0644); err != nil {
 		retErr = err
 		goto cleanup
 	}
@@ -130,6 +130,6 @@ func CheckConcurrentAppendRead(base string) (retErr error) {
 	}
 
 cleanup:
-	ensureAbsent(fpath)
+	_ = os.RemoveAll(fpath)
 	return
 }

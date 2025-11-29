@@ -17,7 +17,7 @@ func CheckOpenFlags(base string) (retErr error) {
 	buf := make([]byte, 4)
 
 	// baseline
-	if err = writeFile(fpath, []byte("BASE")); err != nil {
+	if err = os.WriteFile(fpath, []byte("BASE"), 0644); err != nil {
 		retErr = err
 		goto cleanup
 	}
@@ -68,7 +68,7 @@ func CheckOpenFlags(base string) (retErr error) {
 		goto cleanup
 	}
 
-	b, err = readAll(fpath)
+	b, err = os.ReadFile(fpath)
 	if err != nil {
 		retErr = err
 		goto cleanup
@@ -79,28 +79,39 @@ func CheckOpenFlags(base string) (retErr error) {
 	}
 
 	// restore baseline
-	if err = writeFile(fpath, []byte("BASE")); err != nil {
+	if err = os.WriteFile(fpath, []byte("BASE"), 0644); err != nil {
 		retErr = err
 		goto cleanup
 	}
 
 	// 3) O_APPEND -> writes append
-	if err = appendString(fpath, "A"); err != nil {
-		retErr = err
-		goto cleanup
-	}
-	b, err = readAll(fpath)
+	f, err = os.OpenFile(fpath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 	if err != nil {
 		retErr = err
 		goto cleanup
 	}
-	if !containsSuffix(b, "A") {
+	if _, err = f.Write([]byte("A")); err != nil {
+		_ = f.Close()
+		retErr = err
+		goto cleanup
+	}
+	if err = f.Close(); err != nil {
+		retErr = err
+		goto cleanup
+	}
+
+	b, err = os.ReadFile(fpath)
+	if err != nil {
+		retErr = err
+		goto cleanup
+	}
+	if !bytes.HasSuffix(b, []byte("A")) {
 		retErr = errors.New("O_APPEND did not append")
 		goto cleanup
 	}
 
 	// restore baseline
-	if err = writeFile(fpath, []byte("HELLO WORLD")); err != nil {
+	if err = os.WriteFile(fpath, []byte("HELLO WORLD"), 0644); err != nil {
 		retErr = err
 		goto cleanup
 	}
@@ -117,7 +128,7 @@ func CheckOpenFlags(base string) (retErr error) {
 		goto cleanup
 	}
 	_ = f.Close()
-	b, err = readAll(fpath)
+	b, err = os.ReadFile(fpath)
 	if err != nil {
 		retErr = err
 		goto cleanup
@@ -140,7 +151,7 @@ func CheckOpenFlags(base string) (retErr error) {
 		goto cleanup
 	}
 	_ = f.Close()
-	b, err = readAll(fpath)
+	b, err = os.ReadFile(fpath)
 	if err != nil {
 		retErr = err
 		goto cleanup
@@ -155,6 +166,6 @@ cleanup:
 	if f != nil {
 		_ = f.Close()
 	}
-	ensureAbsent(fpath)
+	_ = os.RemoveAll(fpath)
 	return
 }

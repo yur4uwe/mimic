@@ -13,12 +13,12 @@ func CheckFileOps(base string) (retErr error) {
 	var fh *os.File
 	var err error
 
-	ensureAbsent(f)
-	ensureAbsent(renamed)
+	_ = os.RemoveAll(f)
+	_ = os.RemoveAll(renamed)
 	_ = os.RemoveAll(dir)
 
 	// create and write
-	if err = writeFile(f, []byte("hello world\n")); err != nil {
+	if err = os.WriteFile(f, []byte("hello world\n"), 0644); err != nil {
 		retErr = err
 		goto cleanup
 	}
@@ -71,6 +71,6 @@ cleanup:
 	}
 	_ = os.Remove(renamed)
 	_ = os.RemoveAll(dir)
-	ensureAbsent(f)
+	_ = os.RemoveAll(f)
 	return
 }

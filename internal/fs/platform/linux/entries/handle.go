@@ -12,7 +12,6 @@ import (
 	"bazil.org/fuse"
 	"github.com/mimic/internal/core/casters"
 	"github.com/mimic/internal/core/flags"
-	"github.com/mimic/internal/core/helpers"
 	"github.com/mimic/internal/core/logger"
 	"github.com/mimic/internal/interfaces"
 )
@@ -23,9 +22,44 @@ type Handle struct {
 	logger logger.FullLogger
 	flags  flags.OpenFlag
 	buffer []byte
+	offset int64
 
 	mu     sync.Mutex
 	client interfaces.WebClient
+}
+
+// addToAnchoredBuffer merges `data` into h.buffer anchored at `h.offset`.
+// The buffer is kept contiguous and will grow or be shifted as needed.
+func (h *Handle) addToAnchoredBuffer(offset int64, data []byte) {
+	if len(data) == 0 {
+		return
+	}
+
+	if h.buffer == nil {
+		h.offset = offset
+		h.buffer = make([]byte, len(data))
+		copy(h.buffer, data)
+		return
+	}
+
+	if offset < h.offset {
+		// need to prepend space so new data fits before existing buffer
+		shift := h.offset - offset
+		newLen := int(shift) + len(h.buffer)
+		newBuf := make([]byte, newLen)
+		copy(newBuf[int(shift):], h.buffer)
+		h.buffer = newBuf
+		h.offset = offset
+	}
+
+	rel := int(offset - h.offset)
+	end := rel + len(data)
+	if end > len(h.buffer) {
+		nb := make([]byte, end)
+		copy(nb, h.buffer)
+		h.buffer = nb
+	}
+	copy(h.buffer[rel:end], data)
 }
 
 func NewHandle(wc interfaces.WebClient, logger logger.FullLogger, path string, flags flags.OpenFlag, client interfaces.WebClient) *Handle {
@@ -115,7 +149,7 @@ func (h *Handle) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.W
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.buffer = helpers.AddToBuffer(h.buffer, req.Offset, req.Data)
+	h.addToAnchoredBuffer(req.Offset, req.Data)
 
 	resp.Size = len(req.Data)
 	return nil
@@ -164,23 +198,28 @@ func (h *Handle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.buffer != nil {
-		base, err := h.client.Read(h.path)
-		if err != nil {
-			// if not exist, treat base as empty only if opened with create flag
+		// Attempt to write the anchored buffer using WriteOffset. The
+		// underlying wrapper may try a partial PUT and fall back to a
+		// merged full-write if necessary. If the remote reports the file
+		// doesn't exist and this handle was opened with create, build a
+		// full-sized buffer (zeros up to offset) and write it.
+		if err := h.client.WriteOffset(h.path, h.buffer, h.offset); err != nil {
 			if os.IsNotExist(err) && h.flags.Create() {
-				base = []byte{}
+				end := h.offset + int64(len(h.buffer))
+				if end > int64(^uint(0)>>1) {
+					h.logger.Logf("(Handle) [Flush] too large allocate for %s; returning EIO", h.path)
+					return syscall.Errno(syscall.EIO)
+				}
+				full := make([]byte, int(end))
+				copy(full[int(h.offset):], h.buffer)
+				if werr := h.client.Write(h.path, full); werr != nil {
+					h.logger.Logf("(Handle) [Flush] client.Write error for %s: %v; returning EIO", h.path, werr)
+					return syscall.Errno(syscall.EIO)
+				}
 			} else {
-				h.logger.Logf("(Handle) [Flush] error reading base for %s: %v; returning EIO", h.path, err)
+				h.logger.Logf("(Handle) [Flush] client.WriteOffset error for %s: %v; returning EIO", h.path, err)
 				return syscall.Errno(syscall.EIO)
 			}
-		}
-
-		merged := helpers.MergeBufferIntoBase(base, h.buffer)
-
-		err = h.client.Write(h.path, merged)
-		if err != nil {
-			h.logger.Logf("(Handle) [Flush] client.Write error for %s: %v; returning EIO", h.path, err)
-			return syscall.Errno(syscall.EIO)
 		}
 	}
 

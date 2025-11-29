@@ -15,7 +15,7 @@ func CheckLargeWrite(base string) (retErr error) {
 	zero := bytes.Repeat([]byte{0}, 1024*1024) // 1 MiB
 	var out *os.File
 
-	ensureAbsent(fpath)
+	_ = os.RemoveAll(fpath)
 
 	out, err = os.Create(fpath)
 	if err != nil {
@@ -45,6 +45,6 @@ cleanup:
 	if out != nil {
 		_ = out.Close()
 	}
-	ensureAbsent(fpath)
+	_ = os.RemoveAll(fpath)
 	return
 }

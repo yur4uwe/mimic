@@ -2,6 +2,7 @@ package autochecks
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 )
 
@@ -11,16 +12,16 @@ func CheckTruncate(base string) (retErr error) {
 	var err error
 	var b []byte
 
-	if err = writeFile(fpath, []byte("0123456789")); err != nil {
+	if err = os.WriteFile(fpath, []byte("0123456789"), 0644); err != nil {
 		retErr = err
 		goto cleanup
 	}
 	// truncate smaller
-	if err = truncateFile(fpath, 4); err != nil {
+	if err = os.Truncate(fpath, 4); err != nil {
 		retErr = err
 		goto cleanup
 	}
-	b, err = readAll(fpath)
+	b, err = os.ReadFile(fpath)
 	if err != nil {
 		retErr = err
 		goto cleanup
@@ -30,11 +31,11 @@ func CheckTruncate(base string) (retErr error) {
 		goto cleanup
 	}
 	// extend
-	if err = truncateFile(fpath, 10); err != nil {
+	if err = os.Truncate(fpath, 10); err != nil {
 		retErr = err
 		goto cleanup
 	}
-	b, err = readAll(fpath)
+	b, err = os.ReadFile(fpath)
 	if err != nil {
 		retErr = err
 		goto cleanup
@@ -45,6 +46,6 @@ func CheckTruncate(base string) (retErr error) {
 	}
 
 cleanup:
-	ensureAbsent(fpath)
+	_ = os.RemoveAll(fpath)
 	return
 }
