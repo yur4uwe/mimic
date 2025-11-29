@@ -24,9 +24,10 @@ type openedFile struct {
 	size  int64
 	stat  *fuse.Stat_t
 
-	mu       sync.Mutex
-	segments map[int64][]byte
-	dirty    bool
+	mu sync.Mutex
+	// segments map[int64][]byte
+	buffer []byte
+	dirty  bool
 }
 
 func (of *openedFile) Lock() {
@@ -125,7 +126,7 @@ func (fs *WinfspFS) Open(path string, oflags int) (int, uint64) {
 }
 
 func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle uint64) int {
-	fs.logger.Logf("[Read] path=%s offset=%d fh=%d", path, offset, file_handle)
+	fs.logger.Logf("[Read] path=%s offset=%d len=%d fh=%d", path, offset, len(buffer), file_handle)
 
 	file, ok := fs.GetHandle(file_handle)
 	if !ok {
@@ -175,5 +176,22 @@ func (fs *WinfspFS) Utimens(path string, times []fuse.Timespec) int {
 	}
 
 	// no direct support for setting times in WebDAV; ignore for now
+	return 0
+}
+
+func (fs *WinfspFS) Statfs(path string, stat *fuse.Statfs_t) int {
+	fs.logger.Logf("[Statfs] path=%s", path)
+
+	// provide some reasonable defaults
+	stat.Bsize = DEFAULT_BLOCK_SIZE
+	stat.Frsize = DEFAULT_BLOCK_SIZE
+	stat.Blocks = 1024 * 1024 // 1M blocks
+	stat.Bfree = 512 * 1024   // 50% free
+	stat.Bavail = 512 * 1024  // 50% free
+	stat.Files = 1024 * 1024
+	stat.Ffree = 512 * 1024
+	stat.Favail = 512 * 1024
+	stat.Namemax = 255
+
 	return 0
 }

@@ -11,19 +11,23 @@ import (
 )
 
 // CheckConcurrentAppendRead performs concurrent appends and a reader tailing the file.
-func CheckConcurrentAppendRead(base string) error {
+func CheckConcurrentAppendRead(base string) (retErr error) {
 	fpath := filepath.Join(base, "stream.txt")
 	ensureAbsent(fpath)
-	if err := writeFile(fpath, []byte{}); err != nil {
-		return err
-	}
 
 	const n = 5
 	var wg sync.WaitGroup
-	wg.Add(2)
-
 	appendCh := make(chan error, 1)
 	readCh := make(chan error, 1)
+	var appendErr error
+	var readErr error
+
+	if err := writeFile(fpath, []byte{}); err != nil {
+		retErr = err
+		goto cleanup
+	}
+
+	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
@@ -96,14 +100,18 @@ func CheckConcurrentAppendRead(base string) error {
 	}()
 
 	wg.Wait()
-	appendErr := <-appendCh
-	readErr := <-readCh
-	ensureAbsent(fpath)
+	appendErr = <-appendCh
+	readErr = <-readCh
 	if appendErr != nil {
-		return appendErr
+		retErr = appendErr
+		goto cleanup
 	}
 	if readErr != nil {
-		return readErr
+		retErr = readErr
+		goto cleanup
 	}
-	return nil
+
+cleanup:
+	ensureAbsent(fpath)
+	return
 }

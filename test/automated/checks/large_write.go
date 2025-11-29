@@ -5,34 +5,48 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // CheckLargeWrite writes a 10 MiB file to validate large writes.
-func CheckLargeWrite(base string) error {
-	fpath := filepath.Join(base, "big.bin")
+func CheckLargeWrite(base string) (retErr error) {
+	fpath := filepath.Join(base, "largefile")
+	var info os.FileInfo
+	var err error
+	zero := bytes.Repeat([]byte{0}, 1024*1024) // 1 MiB
+	var out *os.File
+
 	ensureAbsent(fpath)
 
-	out, err := os.Create(fpath)
+	out, err = os.Create(fpath)
 	if err != nil {
-		return err
+		retErr = err
+		goto cleanup
 	}
 
-	zero := bytes.Repeat([]byte{0}, 1024*1024) // 1 MiB
 	for i := 0; i < 10; i++ {
-		if _, err := out.Write(zero); err != nil {
-			out.Close()
-			return err
+		if _, err = out.Write(zero); err != nil {
+			retErr = err
+			goto cleanup
 		}
 	}
-	out.Close()
 
-	info, err := os.Stat(fpath)
+	time.Sleep(500 * time.Millisecond)
+
+	info, err = os.Stat(fpath)
 	if err != nil {
-		return err
+		retErr = err
+		goto cleanup
 	}
 	if info.Size() < 10*1024*1024 {
-		return fmt.Errorf("big file size too small: %d", info.Size())
+		retErr = fmt.Errorf("big file size too small: %d", info.Size())
+		goto cleanup
+	}
+
+cleanup:
+	if out != nil {
+		_ = out.Close()
 	}
 	ensureAbsent(fpath)
-	return nil
+	return
 }

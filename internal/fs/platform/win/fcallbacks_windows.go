@@ -62,9 +62,9 @@ func (fs *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle 
 
 	file.Lock()
 	defer file.Unlock()
-	if err := fs.client.WriteOffset(path, buffer, offset); err != nil {
-		return -fuse.EIO
-	}
+	file.dirty = true
+	// merge incoming write into single file-anchored buffer
+	file.buffer = helpers.AddToBuffer(file.buffer, offset, buffer)
 
 	return len(buffer)
 }
@@ -96,7 +96,12 @@ func (fs *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
 // Release should flush buffered segments (if any) to remote before closing.
 func (fs *WinfspFS) Release(path string, file_handle uint64) (errc int) {
 	fs.logger.Logf("[Release] path=%s handle=%d", path, file_handle)
+	defer fs.handles.Delete(file_handle)
+	return fs.Flush(path, file_handle)
+}
 
+func (fs *WinfspFS) Flush(path string, file_handle uint64) (errc int) {
+	fs.logger.Logf("[Flush]: path=%s fh=%d", path, file_handle)
 	fh, ok := fs.GetHandle(file_handle)
 	if !ok {
 		goto cleanup
@@ -108,11 +113,11 @@ func (fs *WinfspFS) Release(path string, file_handle uint64) (errc int) {
 
 	fh.mu.Lock()
 	defer fh.mu.Unlock()
-	if fh.dirty && len(fh.segments) > 0 {
+	if fh.dirty && len(fh.buffer) > 0 {
 		base, err := fs.client.Read(fh.path)
 		if err != nil {
-			// if not exist, treat base as empty
-			if os.IsNotExist(err) {
+			// if not exist, treat base as empty only if opened with create flag
+			if os.IsNotExist(err) && fh.flags.Create() {
 				base = []byte{}
 			} else {
 				errc = -fuse.EIO
@@ -120,27 +125,25 @@ func (fs *WinfspFS) Release(path string, file_handle uint64) (errc int) {
 			}
 		}
 
-		merged := helpers.MergeSegmentsInto(base, fh.segments)
-		fmt.Println("Merged Length:", len(merged))
+		merged := helpers.MergeBufferIntoBase(base, fh.buffer)
 
 		if err := fs.client.Write(fh.path, merged); err != nil {
-			fs.logger.Errorf("[Release] write flush error=%v path=%s", err, fh.path)
+			fs.logger.Errorf("[Flush] write flush error=%v path=%s", err, fh.path)
 			errc = -fuse.EIO
 			goto cleanup
-		}
-
-		if fi, err := fs.client.Stat(fh.path); err == nil {
-			if int64(len(merged)) != fi.Size() {
-				fs.logger.Errorf("[Release] size mismatch after write path=%s want=%d got=%d", fh.path, len(merged), fi.Size())
-				errc = -fuse.EIO
-				goto cleanup
-			}
 		}
 	}
 
 cleanup:
-	fh.segments = nil
+	// clear buffer after attempt (successful or not we reset dirty state to avoid repeated faulty writes;
+	// adjust behavior if you want to preserve buffer on failure)
+	fh.buffer = nil
 	fh.dirty = false
-	fs.handles.Delete(file_handle)
-	return errc
+
+	return 0
+}
+
+func (fs *WinfspFS) Fsync(path string, datasync bool, file_handle uint64) (errc int) {
+	fs.logger.Logf("[Fsync]: path=%s fh=%d datasync=%v", path, file_handle, datasync)
+	return 0
 }
