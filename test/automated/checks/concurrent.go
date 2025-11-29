@@ -19,8 +19,8 @@ func CheckConcurrentAppendRead(base string) (retErr error) {
 	var wg sync.WaitGroup
 	appendCh := make(chan error, 1)
 	readCh := make(chan error, 1)
-	var appendErr error
-	var readErr error
+
+	var appendErr, readErr error
 
 	if err := writeFile(fpath, []byte{}); err != nil {
 		retErr = err
@@ -31,12 +31,13 @@ func CheckConcurrentAppendRead(base string) (retErr error) {
 
 	go func() {
 		defer wg.Done()
-		for i := 0; i < n; i++ {
+		for i := range n {
 			f, err := os.OpenFile(fpath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 			if err != nil {
 				appendCh <- err
 				return
 			}
+			// write a line
 			line := fmt.Sprintf("x%02d\n", i)
 			if _, err := f.Write([]byte(line)); err != nil {
 				_ = f.Close()
@@ -47,54 +48,71 @@ func CheckConcurrentAppendRead(base string) (retErr error) {
 				appendCh <- err
 				return
 			}
-			time.Sleep(20 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond)
 		}
 		appendCh <- nil
 	}()
 
+	// reader: read newly appended bytes and update last by bytes actually read
 	go func() {
 		defer wg.Done()
 		seen := 0
 		var last int64 = 0
+		start := time.Now()
+		timeout := 5 * time.Second
+
 		for seen < n {
+			// timeout to avoid infinite hang
+			if time.Since(start) > timeout {
+				readCh <- fmt.Errorf("timeout waiting for %d entries, seen %d", n, seen)
+				return
+			}
+
 			info, err := os.Stat(fpath)
 			if err != nil {
-				time.Sleep(20 * time.Millisecond)
+				time.Sleep(50 * time.Millisecond)
 				continue
 			}
+			// check if file size has increased
 			if info.Size() > last {
 				f, err := os.Open(fpath)
 				if err != nil {
 					readCh <- err
 					return
 				}
+				// seek to last read position
 				if _, err := f.Seek(last, io.SeekStart); err != nil {
 					_ = f.Close()
 					readCh <- err
 					return
 				}
-				buf := make([]byte, info.Size()-last)
-				if _, err := io.ReadFull(f, buf); err != nil && err != io.EOF {
+				toRead := int(info.Size() - last)
+				if toRead <= 0 {
+					_ = f.Close()
+					time.Sleep(50 * time.Millisecond)
+					continue
+				}
+				// read new data
+				buf := make([]byte, toRead)
+				nread, err := f.Read(buf)
+				if err != nil && err != io.EOF {
 					_ = f.Close()
 					readCh <- err
 					return
 				}
-				if err := f.Close(); err != nil {
-					readCh <- err
-					return
-				}
-				for _, b := range bytes.Split(buf, []byte{'\n'}) {
-					if len(b) > 0 {
-						seen++
+				_ = f.Close()
+
+				if nread > 0 {
+					parts := bytes.Split(buf[:nread], []byte{'\n'})
+					for _, p := range parts {
+						if len(p) > 0 {
+							seen++
+						}
 					}
+					last += int64(nread)
 				}
-				last = info.Size()
 			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		if seen < n {
-			readCh <- fmt.Errorf("seen %d entries, expected %d", seen, n)
-			return
+			time.Sleep(50 * time.Millisecond)
 		}
 		readCh <- nil
 	}()

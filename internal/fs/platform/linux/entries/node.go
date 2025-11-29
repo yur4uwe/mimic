@@ -217,3 +217,8 @@ func (n *Node) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 
 	return handle, nil
 }
+
+func (n *Node) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
+	n.logger.Logf("(Node) [Fsync] called for %s", n.path)
+	return nil
+}

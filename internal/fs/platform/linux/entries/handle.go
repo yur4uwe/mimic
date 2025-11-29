@@ -12,6 +12,7 @@ import (
 	"bazil.org/fuse"
 	"github.com/mimic/internal/core/casters"
 	"github.com/mimic/internal/core/flags"
+	"github.com/mimic/internal/core/helpers"
 	"github.com/mimic/internal/core/logger"
 	"github.com/mimic/internal/interfaces"
 )
@@ -21,6 +22,7 @@ type Handle struct {
 	wc     interfaces.WebClient
 	logger logger.FullLogger
 	flags  flags.OpenFlag
+	buffer []byte
 
 	mu     sync.Mutex
 	client interfaces.WebClient
@@ -43,6 +45,7 @@ func (h *Handle) Attr(ctx context.Context, a *fuse.Attr) error {
 		if os.IsNotExist(err) {
 			return syscall.Errno(syscall.ENOENT)
 		}
+		h.logger.Logf("(Handle) [Attr] Stat error for %s: %v; returning EIO", h.path, err)
 		return syscall.Errno(syscall.EIO)
 	}
 
@@ -65,6 +68,7 @@ func (h *Handle) ReadAll(ctx context.Context) ([]byte, error) {
 		if os.IsNotExist(err) {
 			return nil, syscall.Errno(syscall.ENOENT)
 		}
+		h.logger.Logf("(Handle) [ReadAll] Read error for %s: %v; returning EIO", h.path, err)
 		return nil, syscall.Errno(syscall.EIO)
 	}
 	return data, nil
@@ -82,6 +86,7 @@ func (h *Handle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.Rea
 		if os.IsNotExist(err) {
 			return syscall.Errno(syscall.ENOENT)
 		}
+		h.logger.Logf("(Handle) [Read] Read error for %s: %v; returning EIO", h.path, err)
 		return syscall.Errno(syscall.EIO)
 	}
 
@@ -110,9 +115,7 @@ func (h *Handle) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.W
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if err := h.client.WriteOffset(h.path, req.Data, req.Offset); err != nil {
-		return syscall.Errno(syscall.EIO)
-	}
+	h.buffer = helpers.AddToBuffer(h.buffer, req.Offset, req.Data)
 
 	resp.Size = len(req.Data)
 	return nil
@@ -149,4 +152,52 @@ func (h *Handle) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 
 func (h *Handle) Poll(ctx context.Context, req *fuse.PollRequest, resp *fuse.PollResponse) error {
 	return syscall.Errno(syscall.ENOSYS)
+}
+
+func (h *Handle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
+	h.logger.Logf("(Handle) [Flush] called for %s", h.path)
+	if !h.flags.WriteAllowed() {
+		h.logger.Logf("(Handle) [Flush] readonly %s, flag state: %+v", h.path, h.flags)
+		return nil
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.buffer != nil {
+		base, err := h.client.Read(h.path)
+		if err != nil {
+			// if not exist, treat base as empty only if opened with create flag
+			if os.IsNotExist(err) && h.flags.Create() {
+				base = []byte{}
+			} else {
+				h.logger.Logf("(Handle) [Flush] error reading base for %s: %v; returning EIO", h.path, err)
+				return syscall.Errno(syscall.EIO)
+			}
+		}
+
+		merged := helpers.MergeBufferIntoBase(base, h.buffer)
+
+		err = h.client.Write(h.path, merged)
+		if err != nil {
+			h.logger.Logf("(Handle) [Flush] client.Write error for %s: %v; returning EIO", h.path, err)
+			return syscall.Errno(syscall.EIO)
+		}
+	}
+
+	h.buffer = nil
+	return nil
+}
+
+func (h *Handle) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
+	h.logger.Logf("(Handle) [Release] called for %s", h.path)
+
+	if h.buffer != nil {
+		h.logger.Logf("(Handle) [Release] flushing buffer for %s", h.path)
+		if err := h.Flush(ctx, nil); err != nil {
+			h.logger.Logf("(Handle) [Release] flush error for %s: %v", h.path, err)
+			return err
+		}
+	}
+
+	return nil
 }

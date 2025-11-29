@@ -80,10 +80,13 @@ func (w *WebdavClient) commit(name string, data []byte) error {
 	}
 
 	defer w.cache.Invalidate(name)
+	var err error
 	if len(data) > streamThreshold {
-		return w.client.WriteStream(name, bytes.NewReader(data), 0644)
+		err = w.client.WriteStream(name, bytes.NewReader(data), 0644)
+	} else {
+		err = w.client.Write(name, data, 0644)
 	}
-	return w.client.Write(name, data, 0644)
+	return err
 }
 
 // fetch reads up to 'upto' bytes from the start of the file.
