@@ -8,8 +8,29 @@ import (
 	"github.com/winfsp/cgofuse/fuse"
 )
 
+func (fs *WinfspFS) Opendir(path string) (int, uint64) {
+	fs.logger.Logf("[Opendir] path=%s", path)
+
+	f, err := fs.client.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return -fuse.ENOENT, 0
+		}
+		return -fuse.EIO, 0
+	}
+
+	handle := fs.NewHandle(path, casters.FileInfoCast(f), 0)
+	return 0, handle
+}
+
+func (fs *WinfspFS) Releasedir(path string, fh uint64) int {
+	fs.logger.Logf("[Releasedir] path=%s fh=%d", path, fh)
+	fs.handles.Delete(fh)
+	return 0
+}
+
 func (fs *WinfspFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int64) bool, off int64, fh uint64) int {
-	fs.logger.Logf("[log] (Readdir): path=%s off=%d fh=%d", filepath, off, fh)
+	fs.logger.Logf("[Readdir] path=%s offset=%d fh=%d", filepath, off, fh)
 
 	fill(".", nil, 0)
 	fill("..", nil, 0)
@@ -28,7 +49,7 @@ func (fs *WinfspFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int
 
 		stat := casters.FileInfoCast(file)
 
-		fs.logger.Logf("[log] (ReaddirEntry): idx=%d name=%s dir=%v size=%d\n", i, name, file.IsDir(), file.Size())
+		fs.logger.Logf("[ReaddirEntry] idx=%d name=%s dir=%v size=%d", i, name, file.IsDir(), file.Size())
 
 		fill(name, stat, 0)
 	}
@@ -37,7 +58,7 @@ func (fs *WinfspFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int
 }
 
 func (fs *WinfspFS) Mkdir(p string, mode uint32) int {
-	fs.logger.Logf("[log] (Mkdir): path=%s mode=%#o", p, mode)
+	fs.logger.Logf("[Mkdir] path=%s mode=%#o", p, mode)
 	s, err := casters.NormalizePath(p)
 	if err != nil {
 		fs.logger.Errorf("[Mkdir] Path unescape error for path=%s error=%v", p, err)
@@ -53,7 +74,7 @@ func (fs *WinfspFS) Mkdir(p string, mode uint32) int {
 }
 
 func (fs *WinfspFS) Rmdir(path string) int {
-	fs.logger.Logf("[log] (Rmdir): path=%s", path)
+	fs.logger.Logf("[Rmdir] path=%s", path)
 
 	err := fs.client.Rmdir(path)
 	if err != nil {
