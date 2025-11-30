@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/mimic/internal/core/casters"
-	"github.com/mimic/internal/core/helpers"
 	"github.com/winfsp/cgofuse/fuse"
 )
 
@@ -22,12 +21,18 @@ func (fs *WinfspFS) Truncate(p string, size int64, fh uint64) int {
 		return -fuse.EIO
 	}
 
-	if !file.flags.WriteAllowed() {
+	if !file.Flags().WriteAllowed() {
 		fmt.Println("Truncate forbidden")
 		return -fuse.EACCES
 	}
 
-	err := fs.client.Truncate(p, size)
+	norm, err := casters.NormalizePath(p)
+	if err != nil {
+		fs.logger.Errorf("[Truncate] Path normalize error for path=%s error=%v", p, err)
+		return -fuse.EIO
+	}
+
+	err = fs.client.Truncate(norm, size)
 	if err != nil {
 		return -fuse.EIO
 	}
@@ -40,7 +45,12 @@ func (fs *WinfspFS) Unlink(p string) int {
 	if strings.HasSuffix(p, "/") && p != "/" {
 		p = strings.TrimSuffix(p, "/")
 	}
-	if err := fs.client.Remove(p); err != nil {
+	norm, err := casters.NormalizePath(p)
+	if err != nil {
+		fs.logger.Errorf("[Unlink] Path normalize error for path=%s error=%v", p, err)
+		return -fuse.EIO
+	}
+	if err := fs.client.Remove(norm); err != nil {
 		return -fuse.EIO
 	}
 
@@ -55,16 +65,15 @@ func (fs *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle 
 		return -fuse.EIO
 	}
 
-	if !file.flags.WriteAllowed() {
+	if !file.Flags().WriteAllowed() {
 		fmt.Println("Write forbidden")
 		return -fuse.EACCES
 	}
 
 	file.Lock()
-	defer file.Unlock()
-	file.dirty = true
-	// merge incoming write into single file-anchored buffer
-	file.buffer = helpers.AddToBuffer(file.buffer, offset, buffer)
+	// Add data into the handle buffer (will mark dirty via non-nil buffer)
+	file.AddToBuffer(offset, buffer)
+	file.Unlock()
 
 	return len(buffer)
 }
@@ -104,41 +113,41 @@ func (fs *WinfspFS) Flush(path string, file_handle uint64) (errc int) {
 	fs.logger.Logf("[Flush]: path=%s fh=%d", path, file_handle)
 	fh, ok := fs.GetHandle(file_handle)
 	if !ok {
-		goto cleanup
+		return 0
 	}
 
-	if !fh.flags.WriteAllowed() {
-		goto cleanup
+	if !fh.Flags().WriteAllowed() {
+		return 0
 	}
 
-	fh.mu.Lock()
-	defer fh.mu.Unlock()
-	if fh.dirty && len(fh.buffer) > 0 {
-		base, err := fs.client.Read(fh.path)
-		if err != nil {
-			// if not exist, treat base as empty only if opened with create flag
-			if os.IsNotExist(err) && fh.flags.Create() {
-				base = []byte{}
+	fh.Lock()
+	defer fh.Unlock()
+	if fh.IsDirty() {
+		buf, off := fh.Buffer()
+		fs.logger.Logf("[Flush] about to write path=%s buffer_len=%d buffer_off=%d", fh.Path(), len(buf), off)
+		if err := fs.client.WriteOffset(fh.Path(), buf, off); err != nil {
+			if os.IsNotExist(err) && fh.Flags().Create() {
+				end := off + int64(len(buf))
+				if end > int64(^uint(0)>>1) {
+					fh.Unlock()
+					fs.logger.Logf("[Flush] too large allocate for %s; returning EIO", fh.Path())
+					return -fuse.EIO
+				}
+				full := make([]byte, int(end))
+				copy(full[int(off):], buf)
+				if werr := fs.client.Write(fh.Path(), full); werr != nil {
+					fh.Unlock()
+					fs.logger.Logf("[Flush] client.Write error for %s: %v; returning EIO", fh.Path(), werr)
+					return -fuse.EIO
+				}
 			} else {
-				errc = -fuse.EIO
-				goto cleanup
+				fh.Unlock()
+				fs.logger.Logf("[Flush] client.WriteOffset error for %s: %v; returning EIO", fh.Path(), err)
+				return -fuse.EIO
 			}
 		}
-
-		merged := helpers.MergeBufferIntoBase(base, fh.buffer)
-
-		if err := fs.client.Write(fh.path, merged); err != nil {
-			fs.logger.Errorf("[Flush] write flush error=%v path=%s", err, fh.path)
-			errc = -fuse.EIO
-			goto cleanup
-		}
+		fh.ClearBuffer()
 	}
-
-cleanup:
-	// clear buffer after attempt (successful or not we reset dirty state to avoid repeated faulty writes;
-	// adjust behavior if you want to preserve buffer on failure)
-	fh.buffer = nil
-	fh.dirty = false
 
 	return 0
 }

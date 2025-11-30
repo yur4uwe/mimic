@@ -4,12 +4,12 @@ import (
 	"io"
 	"os"
 	"strings"
-	"sync"
 	"sync/atomic"
 
 	"github.com/mimic/internal/core/casters"
 	"github.com/mimic/internal/core/checks"
 	"github.com/mimic/internal/core/flags"
+	"github.com/mimic/internal/fs/common"
 	"github.com/winfsp/cgofuse/fuse"
 )
 
@@ -19,32 +19,17 @@ const (
 )
 
 type openedFile struct {
-	path  string
-	flags flags.OpenFlag
-	size  int64
-	stat  *fuse.Stat_t
-
-	mu sync.Mutex
-	// segments map[int64][]byte
-	buffer []byte
-	dirty  bool
-}
-
-func (of *openedFile) Lock() {
-	of.mu.Lock()
-}
-
-func (of *openedFile) Unlock() {
-	of.mu.Unlock()
+	common.FileHandle
+	size int64
+	stat *fuse.Stat_t
 }
 
 func (fs *WinfspFS) NewHandle(path string, stat *fuse.Stat_t, oflags uint32) uint64 {
 	file_handle := atomic.AddUint64(&fs.nextHandle, 1)
 	fs.handles.Store(file_handle, &openedFile{
-		path:  path,
-		flags: flags.OpenFlag(oflags),
-		size:  stat.Size,
-		stat:  stat,
+		FileHandle: *common.NewFilehandle(path, flags.OpenFlag(oflags)),
+		size:       stat.Size,
+		stat:       stat,
 	})
 	return file_handle
 }
@@ -132,8 +117,7 @@ func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle u
 	if !ok {
 		return -fuse.EIO
 	}
-
-	if !file.flags.ReadAllowed() {
+	if !file.Flags().ReadAllowed() {
 		return -fuse.EACCES
 	}
 
@@ -142,7 +126,7 @@ func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle u
 	}
 
 	toRead := len(buffer)
-	rc, err := fs.client.ReadRange(file.path, offset, int64(toRead))
+	rc, err := fs.client.ReadRange(file.Path(), offset, int64(toRead))
 	if err != nil {
 		return -fuse.EIO
 	}

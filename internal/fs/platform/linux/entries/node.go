@@ -148,7 +148,7 @@ func (n *Node) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.C
 		return nil, nil, err
 	}
 
-	handle := NewHandle(n.wc, n.logger, newFilePath, oflags, n.wc)
+	handle := NewHandle(n.wc, n.logger, newFilePath, oflags)
 	node := NewNode(n.wc, n.logger, newFilePath)
 	return node, handle, nil
 }
@@ -213,7 +213,7 @@ func (n *Node) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 		}
 	}
 
-	handle := NewHandle(n.wc, n.logger, n.path, flags, n.wc)
+	handle := NewHandle(n.wc, n.logger, n.path, flags)
 
 	return handle, nil
 }
