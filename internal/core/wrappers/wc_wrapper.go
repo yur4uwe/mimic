@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/mimic/internal/core/cache"
@@ -212,25 +213,62 @@ func (w *WebdavClient) Create(name string) error {
 	if strings.HasSuffix(name, "/") {
 		return &os.PathError{Op: "create", Path: name, Err: os.ErrInvalid}
 	}
+	// invalidate parent dir listings after create
+	parent := path.Dir(strings.TrimRight(name, "/"))
+	if parent == "." {
+		parent = "/"
+	}
+	defer w.cache.InvalidateTree(parent + "/")
 	return w.commit(name, 0, []byte{})
 }
 
 func (w *WebdavClient) Remove(name string) error {
+	// invalidate parent dir listings after remove
+	parent := path.Dir(strings.TrimRight(name, "/"))
+	if parent == "." {
+		parent = "/"
+	}
+	defer w.cache.InvalidateTree(parent + "/")
 	defer w.cache.Invalidate(name)
 	return w.client.Remove(name)
 }
 
 func (w *WebdavClient) Mkdir(name string, mode os.FileMode) error {
+	// invalidate parent dir listings after mkdir
+	parent := path.Dir(strings.TrimRight(name, "/"))
+	if parent == "." {
+		parent = "/"
+	}
+	defer w.cache.InvalidateTree(parent + "/")
 	defer w.cache.Invalidate(name)
 	return w.client.Mkdir(name+"/", mode)
 }
 
 func (w *WebdavClient) Rmdir(name string) error {
+	// invalidate parent dir listings after rmdir
+	parent := path.Dir(strings.TrimRight(name, "/"))
+	if parent == "." {
+		parent = "/"
+	}
+	defer w.cache.InvalidateTree(parent + "/")
 	defer w.cache.InvalidateTree(name + "/")
 	return w.client.RemoveAll(name + "/")
 }
 
 func (w *WebdavClient) Rename(oldname, newname string) error {
+	// invalidate parent dirs of both source and destination
+	oldParent := path.Dir(strings.TrimRight(oldname, "/"))
+	if oldParent == "." {
+		oldParent = "/"
+	}
+	newParent := path.Dir(strings.TrimRight(newname, "/"))
+	if newParent == "." {
+		newParent = "/"
+	}
+	defer w.cache.InvalidateTree(oldParent + "/")
+	defer w.cache.InvalidateTree(newParent + "/")
+
+	// still invalidate trees for the entries themselves
 	defer w.cache.InvalidateTree(oldname)
 	defer w.cache.InvalidateTree(newname)
 	return w.client.Rename(oldname, newname, true)

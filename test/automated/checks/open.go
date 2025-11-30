@@ -3,6 +3,7 @@ package autochecks
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ func CheckOpenFlags(base string) (retErr error) {
 	var f *os.File
 	var err error
 	var b []byte
+	var n int
 	buf := make([]byte, 4)
 
 	// baseline
@@ -57,8 +59,8 @@ func CheckOpenFlags(base string) (retErr error) {
 		retErr = errors.New("read succeeded on O_WRONLY (should fail)")
 		goto cleanup
 	}
-	// write should succeed
-	if _, err = f.Write([]byte("WO")); err != nil {
+	// write should succeed and return correct byte count
+	if n, err = f.Write([]byte("WO")); err != nil || n != 2 {
 		clerr := f.Close()
 		retErr = errors.Join(err, clerr)
 		goto cleanup
@@ -73,10 +75,12 @@ func CheckOpenFlags(base string) (retErr error) {
 		retErr = err
 		goto cleanup
 	}
+	fmt.Println(b)
 	if !bytes.Contains(b, []byte("WO")) {
 		retErr = errors.New("O_WRONLY did not write as expected")
 		goto cleanup
 	}
+	// optional: ensure at least two bytes were written (we already checked n == 2 above)
 
 	// restore baseline
 	if err = os.WriteFile(fpath, []byte("BASE"), 0644); err != nil {
@@ -90,9 +94,9 @@ func CheckOpenFlags(base string) (retErr error) {
 		retErr = err
 		goto cleanup
 	}
-	if _, err = f.Write([]byte("A")); err != nil {
+	if n, err = f.Write([]byte("A")); err != nil || n != 1 {
 		_ = f.Close()
-		retErr = err
+		retErr = errors.Join(err, errors.New("unexpected write byte count for O_APPEND"))
 		goto cleanup
 	}
 	if err = f.Close(); err != nil {
@@ -109,6 +113,11 @@ func CheckOpenFlags(base string) (retErr error) {
 		retErr = errors.New("O_APPEND did not append")
 		goto cleanup
 	}
+	// verify file length increased by 1 compared to baseline
+	if len(b) != 5 { // baseline "BASE" (4) + "A" (1) == 5
+		retErr = fmt.Errorf("O_APPEND resulted in unexpected file size: %d", len(b))
+		goto cleanup
+	}
 
 	// restore baseline
 	if err = os.WriteFile(fpath, []byte("HELLO WORLD"), 0644); err != nil {
@@ -122,9 +131,9 @@ func CheckOpenFlags(base string) (retErr error) {
 		retErr = err
 		goto cleanup
 	}
-	if _, err = f.Write([]byte("T")); err != nil {
+	if n, err = f.Write([]byte("T")); err != nil || n != 1 {
 		_ = f.Close()
-		retErr = err
+		retErr = errors.Join(err, errors.New("unexpected write byte count for O_TRUNC"))
 		goto cleanup
 	}
 	_ = f.Close()
@@ -137,6 +146,10 @@ func CheckOpenFlags(base string) (retErr error) {
 		retErr = errors.New("O_TRUNC didn't truncate")
 		goto cleanup
 	}
+	if len(b) != 1 {
+		retErr = fmt.Errorf("O_TRUNC produced unexpected size: %d", len(b))
+		goto cleanup
+	}
 
 	// 6) O_CREAT creates when missing
 	_ = os.Remove(fpath)
@@ -145,9 +158,9 @@ func CheckOpenFlags(base string) (retErr error) {
 		retErr = err
 		goto cleanup
 	}
-	if _, err = f.Write([]byte("C")); err != nil {
+	if n, err = f.Write([]byte("C")); err != nil || n != 1 {
 		_ = f.Close()
-		retErr = err
+		retErr = errors.Join(err, errors.New("unexpected write byte count for O_CREATE"))
 		goto cleanup
 	}
 	_ = f.Close()
@@ -158,6 +171,10 @@ func CheckOpenFlags(base string) (retErr error) {
 	}
 	if !bytes.Equal(b, []byte("C")) {
 		retErr = errors.New("O_CREATE did not create/write")
+		goto cleanup
+	}
+	if len(b) != 1 {
+		retErr = fmt.Errorf("O_CREATE produced unexpected size: %d", len(b))
 		goto cleanup
 	}
 

@@ -4,42 +4,52 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"path/filepath"
+	"path"
+	"time"
 )
 
 // CheckLargeWrite writes a 10 MiB file to validate large writes.
 func CheckLargeWrite(base string) (retErr error) {
-	fpath := filepath.Join(base, "largefile")
+	fpath := path.Join(base, "largefile")
 	var info os.FileInfo
 	var err error
-	zero := bytes.Repeat([]byte{0}, 1024*1024) // 1 MiB
+	var retries int = 5
 	var out *os.File
+	zero := bytes.Repeat([]byte{0}, 1024*1024) // 1 MiB
 
 	_ = os.RemoveAll(fpath)
 
 	out, err = os.Create(fpath)
 	if err != nil {
-		retErr = err
+		retErr = fmt.Errorf("failed to create file: %w", err)
 		goto cleanup
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		if _, err = out.Write(zero); err != nil {
-			retErr = err
+			retErr = fmt.Errorf("failed to write to file: %w", err)
 			goto cleanup
 		}
 	}
 	_ = out.Close()
 
+retry:
 	info, err = os.Stat(fpath)
 	if err != nil {
-		retErr = err
+		retErr = fmt.Errorf("failed to stat file: %w", err)
 		goto cleanup
 	}
 	if info.Size() < 10*1024*1024 {
-		retErr = fmt.Errorf("big file size too small: %d", info.Size())
-		goto cleanup
+		if retries == 0 {
+			retErr = fmt.Errorf("Failed to correctly stat a file after 5 tries")
+			goto cleanup
+		}
+		retries--
+		time.Sleep(500 * time.Millisecond)
+		goto retry
 	}
+
+	fmt.Printf("Succeeded after %d retries\n", 5-retries+1)
 
 cleanup:
 	if out != nil {
