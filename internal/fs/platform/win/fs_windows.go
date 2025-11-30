@@ -25,10 +25,9 @@ func New(webdavClient interfaces.WebClient, logger logger.FullLogger) *WinfspFS 
 }
 
 func (fs *WinfspFS) Mount(mountpoint string, flags []string) error {
-	fmt.Println("Mounting WinFSP filesystem at", mountpoint)
-
 	host := fuse.NewFileSystemHost(fs)
 	if !host.Mount(mountpoint, flags) {
+		fs.logger.Error("Failed to mount WinFSP filesystem")
 		return fmt.Errorf("failed to mount WinFSP filesystem")
 	}
 
@@ -36,6 +35,6 @@ func (fs *WinfspFS) Mount(mountpoint string, flags []string) error {
 }
 
 func (fs *WinfspFS) Unmount() error {
-	fmt.Println("Unmounting WinFSP filesystem")
+	fs.logger.Log("Unmounting WinFSP filesystem")
 	return nil
 }

@@ -15,3 +15,7 @@ type ErrorLogger interface {
 type ErrorFormatLogger interface {
 	Errorf(format string, v ...any)
 }
+
+type LoggerCloser interface {
+	Close() error
+}

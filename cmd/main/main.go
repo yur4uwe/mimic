@@ -3,10 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
-	"strings"
-	"time"
 
 	"github.com/mimic/internal/core/cache"
+	"github.com/mimic/internal/core/config"
 	"github.com/mimic/internal/core/logger"
 	"github.com/mimic/internal/core/wrappers"
 	"github.com/mimic/internal/fs"
@@ -14,65 +13,33 @@ import (
 	"github.com/studio-b12/gowebdav"
 )
 
-func usage() {
-	fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [options] <mountpoint> <server>\n", os.Args[0])
-	flag.PrintDefaults()
-}
-
 func main() {
-	var (
-		userPtr       *string
-		ttlPtr        *time.Duration
-		maxEntriesPtr *int
-		verbosePtr    *bool
-		logOutputs    []string
-	)
+	cfg, args, err := config.ParseCommandLineArgs()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "failed to parse config/flags:", err)
+		os.Exit(2)
+	}
 
-	userPtr = flag.StringP("user", "u", "", "username:password (shorthand)")
-	ttlPtr = flag.DurationP("ttl", "t", time.Minute, "cache TTL")
-	maxEntriesPtr = flag.IntP("max-entries", "m", 1000, "cache max entries")
-	verbosePtr = flag.BoolP("verbose", "v", false, "enable verbose logging")
-	logOutputs = *flag.StringSliceP("log", "l", []string{}, "log outputs: stdout, stderr, or txt file paths")
-
-	flag.Usage = usage
-	flag.Parse()
-
-	user := *userPtr
-	ttl := *ttlPtr
-	maxEntries := *maxEntriesPtr
-	verbose := *verbosePtr
-
-	if flag.NArg() < 2 {
+	if len(args) < 2 {
 		fmt.Fprintln(os.Stderr, "Error: missing required positional arguments: <mountpoint> <server>")
 		flag.Usage()
 		os.Exit(2)
 	}
 
-	mountpoint := flag.Arg(0)
-	server := flag.Arg(1)
+	mountpoint := args[0]
+	server := args[1]
 
-	if user == "" {
-		fmt.Fprintln(os.Stderr, "Error: missing credentials; provide -u username:password")
+	if cfg.Username == "" || cfg.Password == "" {
+		fmt.Fprintln(os.Stderr, "Error: missing credentials; provide -u username:password or set in config")
 		flag.Usage()
 		os.Exit(2)
 	}
 
-	parts := strings.SplitN(user, ":", 2)
-	username := parts[0]
-	password := ""
-	if len(parts) > 1 {
-		password = parts[1]
-	}
-	if username == "" || password == "" {
-		fmt.Fprintln(os.Stderr, "Error: credentials must be in form username:password")
-		os.Exit(2)
+	if cfg.Verbose {
+		fmt.Printf("mount=%q server=%q user=%q ttl=%s maxEntries=%d\n", mountpoint, server, cfg.Username, cfg.TTL, cfg.MaxEntries)
 	}
 
-	if verbose {
-		fmt.Printf("mount=%q server=%q user=%q ttl=%s maxEntries=%d\n", mountpoint, server, username, ttl, maxEntries)
-	}
-
-	client := gowebdav.NewClient(server, username, password)
+	client := gowebdav.NewClient(server, cfg.Username, cfg.Password)
 	fmt.Println("Trying to connect to the server...")
 	if err := client.Connect(); err != nil {
 		fmt.Fprintln(os.Stderr, "webdav client: couldn't connect to the server:", err)
@@ -80,10 +47,15 @@ func main() {
 	}
 	fmt.Println("Server health check successful")
 
-	logger := logger.New(verbose, logOutputs)
-	cache := cache.NewNodeCache(ttl, maxEntries)
+	logger, err := logger.New(cfg.Verbose, cfg.StdLog, cfg.ErrLog)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "failed to initialize logger:", err)
+		os.Exit(1)
+	}
+	defer logger.Close()
+	cache := cache.NewNodeCache(cfg.TTL, cfg.MaxEntries)
 
-	webdavClient := wrappers.NewWebdavClient(client, cache, server, username, password, true)
+	webdavClient := wrappers.NewWebdavClient(client, cache, server, cfg.Username, cfg.Password, true)
 	filesystem := fs.New(webdavClient, logger)
 
 	defer filesystem.Unmount()

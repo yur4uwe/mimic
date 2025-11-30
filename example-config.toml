@@ -1,0 +1,12 @@
+# server
+username = "user"
+password = "pass"
+
+# cache
+ttl = "1s" # important to be in quotes!
+max-entries = 100
+
+# logger
+verbose = true
+err = "stderr"
+std = "stdout"

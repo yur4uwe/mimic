@@ -2,7 +2,6 @@ package linux
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -50,7 +49,7 @@ func (fs *FuseFS) Mount(mountpoint string, mflags []string) error {
 		return fmt.Errorf("cannot access mountpoint %q: %w", mountpoint, err)
 	}
 
-	fmt.Println("Mounting...")
+	fs.logger.Log("Mounting...")
 	c, err := fuse.Mount(
 		mountpoint,
 		fuse.FSName("mimic"),
@@ -59,7 +58,7 @@ func (fs *FuseFS) Mount(mountpoint string, mflags []string) error {
 	if err != nil {
 		return fmt.Errorf("fuse mount failed: %w", err)
 	}
-	fmt.Println("Mounted, starting server...")
+	fs.logger.Log("Mounted, starting server...")
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)
 
@@ -67,7 +66,7 @@ func (fs *FuseFS) Mount(mountpoint string, mflags []string) error {
 		fusefs.Serve(c, fs)
 	}()
 
-	fmt.Println("Fuse is serving")
+	fs.logger.Log("Fuse is serving")
 	<-sigChan
 
 	// store runtime state for Unmount
@@ -75,7 +74,7 @@ func (fs *FuseFS) Mount(mountpoint string, mflags []string) error {
 	fs.conn = c
 	fs.mounted = true
 
-	fmt.Println("Mounted Fuse on", mountpoint)
+	fs.logger.Logf("Mounted Fuse on %s", mountpoint)
 	return nil
 }
 
@@ -102,9 +101,9 @@ func (fs *FuseFS) Unmount() error {
 	if err := fuse.Unmount(mp); err != nil {
 		// Unmount can fail when processes keep files open. Try a lazy unmount fallback,
 		// and log the error so operator can take manual action (fuser/kill).
-		log.Printf("fuse.Unmount error: %v", err)
+		fs.logger.Errorf("fuse.Unmount error: %v", err)
 		if ex := exec.Command("fusermount3", "-uz", mp).Run(); ex != nil {
-			log.Printf("fusermount3 -uz failed: %v", ex)
+			fs.logger.Errorf("fusermount3 -uz failed: %v", ex)
 		}
 	}
 
@@ -113,10 +112,10 @@ func (fs *FuseFS) Unmount() error {
 	}
 
 	if serveErr != nil {
-		log.Printf("fs.Serve returned error: %v", serveErr)
+		fs.logger.Errorf("fs.Serve returned error: %v", serveErr)
 	}
 
-	fmt.Println("Unmounted", mp)
+	fs.logger.Logf("Unmounted %s", mp)
 	return nil
 }
 
