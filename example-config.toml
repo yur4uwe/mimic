@@ -1,4 +1,4 @@
-# server
+# server credentials
 username = "user"
 password = "pass"
 
@@ -8,5 +8,11 @@ max-entries = 100
 
 # logger
 verbose = true
+
+# possile values for streams are:
+# - "stdout" (only for 'std')
+# - "stderr" (only for 'err')
+# - "discard" - ignores the stream
+# - file path (program will create the path if it doesn't exist)
 err = "stderr"
 std = "stdout"

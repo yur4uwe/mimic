@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/mimic/internal/interfaces"
 )
@@ -18,65 +20,105 @@ type FullLogger interface {
 }
 
 type Logger struct {
-	verbose bool
-	stdw    io.Writer
-	errw    io.Writer
-	files   []*os.File
+	verbose   bool
+	stdLogger *log.Logger
+	errLogger *log.Logger
+	files     []*os.File
 }
 
 func New(verbose bool, stdlog, errlog string) (FullLogger, error) {
 	var std_writer, err_writer io.Writer
 	var files []*os.File
+	var createErr error
 
-	if stdlog == "stdout" || stdlog == "" {
-		std_writer = os.Stdout
-	} else {
-		f, err := os.OpenFile(stdlog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-		if err != nil {
-			return nil, fmt.Errorf("cannot open log file: %v", err)
+	tryOpenFile := func(path string) (*os.File, error) {
+		dir := filepath.Dir(path)
+		if dir != "." && dir != "" {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return nil, fmt.Errorf("cannot create log directory: %v", err)
+			}
 		}
+		return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	}
+
+	switch stdlog {
+	case "stdout", "":
+		std_writer = os.Stdout
+	case "discard":
+		std_writer = io.Discard
+	default:
+		f, err := tryOpenFile(stdlog)
+		if err != nil {
+			createErr = fmt.Errorf("cannot open standard log file: %v", err)
+			goto failure
+		}
+
 		std_writer = f
 		files = append(files, f)
 	}
-	if errlog == "stderr" || errlog == "" {
+
+	switch errlog {
+	case "stderr", "":
 		err_writer = os.Stderr
-	} else {
-		f, err := os.OpenFile(errlog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-		if err != nil {
-			return nil, fmt.Errorf("cannot open error log file: %v", err)
+	case "discard":
+		err_writer = io.Discard
+	default:
+		if errlog != stdlog {
+			f, err := tryOpenFile(errlog)
+			if err != nil {
+				createErr = fmt.Errorf("cannot open error log file: %v", err)
+				goto failure
+			}
+
+			err_writer = f
+			files = append(files, f)
+		} else {
+			err_writer = std_writer
 		}
-		err_writer = f
-		files = append(files, f)
 	}
 
 	return &Logger{
-		verbose: verbose,
-		stdw:    std_writer,
-		errw:    err_writer,
-		files:   files,
+		verbose:   verbose,
+		stdLogger: log.New(std_writer, "", log.LstdFlags|log.Lmicroseconds),
+		errLogger: log.New(err_writer, "", log.LstdFlags|log.Lmicroseconds),
+		files:     files,
 	}, nil
+
+failure:
+	for _, f := range files {
+		_ = f.Close()
+	}
+	return nil, createErr
 }
 
 func (l *Logger) Log(v ...any) {
 	if !l.verbose {
 		return
 	}
-	fmt.Fprintln(l.stdw, v...)
+	if l.stdLogger != nil {
+		l.stdLogger.Print(v...)
+	}
 }
 
 func (l *Logger) Logf(format string, v ...any) {
 	if !l.verbose {
 		return
 	}
-	fmt.Fprintf(l.stdw, format+"\n", v...)
+	if l.stdLogger != nil {
+		l.stdLogger.Printf(format, v...)
+	}
 }
 
 func (l *Logger) Error(v ...any) {
-	fmt.Fprintln(l.errw, v...)
+	if l.errLogger != nil {
+		l.errLogger.Print(v...)
+	}
 }
 
 func (l *Logger) Errorf(format string, v ...any) {
-	fmt.Fprintf(l.errw, format+"\n", v...)
+	if l.errLogger != nil {
+		l.errLogger.Printf(format, v...)
+	}
 }
 
 func (l *Logger) Close() error {

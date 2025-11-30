@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -11,65 +13,106 @@ import (
 )
 
 type Config struct {
-	Mountpoint string
-	URL        string
+	Mountpoint string `toml:"mpoint"`
 
-	TTL        time.Duration
-	MaxEntries int
+	URL      string `toml:"url"`
+	Username string `toml:"username"`
+	Password string `toml:"password"`
 
-	Username string
-	Password string
+	TTL        time.Duration `toml:"ttl"`
+	MaxEntries int           `toml:"max-entries"`
 
-	Verbose bool
-	StdLog  string
-	ErrLog  string
+	Verbose bool   `toml:"verbose"`
+	StdLog  string `toml:"std"`
+	ErrLog  string `toml:"err"`
+}
+
+const defaultConfig = `# server
+username = "user"
+password = "pass"
+
+# cache
+ttl = "1s" # important to be in quotes!
+max-entries = 100
+
+# logger
+verbose = false
+err = "stderr"
+std = "stdout"
+`
+
+// On Linux/macOS uses XDG_CONFIG_HOME or ~/.config; on Windows uses %APPDATA%.
+func userConfigPath(appName, filename string) (string, error) {
+	var base string
+	if runtime.GOOS == "windows" {
+		base = os.Getenv("APPDATA")
+		if base == "" {
+			home := os.Getenv("USERPROFILE")
+			if home == "" {
+				return "", fmt.Errorf("cannot determine APPDATA or USERPROFILE")
+			}
+			base = filepath.Join(home, "AppData", "Roaming")
+		}
+	} else {
+		base = os.Getenv("XDG_CONFIG_HOME")
+		if base == "" {
+			home := os.Getenv("HOME")
+			if home == "" {
+				return "", fmt.Errorf("cannot determine HOME")
+			}
+			base = filepath.Join(home, ".config")
+		}
+	}
+	dir := filepath.Join(base, appName)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, filename), nil
+}
+
+func writeDefaultConfig(path, content string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(content), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func ParseConfig(path string) (*Config, error) {
+	var cfg Config
+
 	if path == "" {
-		return &Config{}, nil
+		// No config path provided; try per-user config.
+		defCfgPath, perr := userConfigPath("mimic", "config.toml")
+		if perr != nil {
+			return nil, perr
+		}
+
+		// If the per-user config doesn't exist, try creating a default one.
+		if _, statErr := os.Stat(defCfgPath); os.IsNotExist(statErr) {
+			fmt.Println("Missing per user config, trying to create a new one at", defCfgPath)
+			if werr := writeDefaultConfig(defCfgPath, defaultConfig); werr != nil {
+				return nil, werr
+			}
+		}
+
+		// Use the per-user config path (either existing or newly created).
+		path = defCfgPath
 	}
 
-	// intermediate struct mirrors config file keys (simple mapping)
-	var raw struct {
-		Mpoint     string `toml:"mpoint"`
-		URL        string `toml:"url"`
-		Username   string `toml:"username"`
-		Password   string `toml:"password"`
-		TTL        string `toml:"ttl"`
-		MaxEntries int    `toml:"max-entries"`
-		Verbose    bool   `toml:"verbose"`
-		Std        string `toml:"std"`
-		Err        string `toml:"err"`
+	if path == "" {
+		return nil, fmt.Errorf("no config path provided and no per-user config available")
 	}
 
-	if _, err := toml.DecodeFile(path, &raw); err != nil {
+	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return nil, err
 	}
 
-	cfg := &Config{}
-	if raw.Mpoint != "" {
-		cfg.Mountpoint = raw.Mpoint
-	}
-	if raw.URL != "" {
-		cfg.URL = raw.URL
-	}
-	cfg.Username = raw.Username
-	cfg.Password = raw.Password
-
-	if raw.TTL != "" {
-		if d, err := time.ParseDuration(raw.TTL); err == nil {
-			cfg.TTL = d
-		}
-	}
-	if raw.MaxEntries != 0 {
-		cfg.MaxEntries = raw.MaxEntries
-	}
-	cfg.Verbose = raw.Verbose
-	cfg.StdLog = raw.Std
-	cfg.ErrLog = raw.Err
-
-	return cfg, nil
+	return &cfg, nil
 }
 
 func usage() {
@@ -86,26 +129,24 @@ func ParseCommandLineArgs() (*Config, []string, error) {
 		verbosePtr    = flag.BoolP("verbose", "v", false, "enable verbose logging")
 		stdlogPtr     = flag.StringP("stdlog", "s", "", "path to standard log file")
 		errlogPtr     = flag.StringP("errlog", "e", "", "path to error log file")
+		wherePtr      = flag.Bool("where-config", false, "print the path to the config file and exit")
 	)
 
 	flag.Usage = usage
 	flag.Parse()
 
-	fileCfg, err := ParseConfig(*configFPtr)
+	cfg, err := ParseConfig(*configFPtr)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	cfg := &Config{
-		Mountpoint: fileCfg.Mountpoint,
-		URL:        fileCfg.URL,
-		TTL:        fileCfg.TTL,
-		MaxEntries: fileCfg.MaxEntries,
-		Username:   fileCfg.Username,
-		Password:   fileCfg.Password,
-		Verbose:    fileCfg.Verbose,
-		StdLog:     fileCfg.StdLog,
-		ErrLog:     fileCfg.ErrLog,
+	if *wherePtr {
+		p, perr := userConfigPath("mimic", "config.toml")
+		if perr != nil {
+			return nil, nil, perr
+		}
+		fmt.Println(p)
+		os.Exit(0)
 	}
 
 	if flag.Lookup("ttl").Changed {
