@@ -101,6 +101,9 @@ func (b *MemBackend) handler(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			_, _ = w.Write(data)
 		}
+	case "OPTIONS":
+		w.Header().Set("Allow", "OPTIONS, GET, HEAD, PUT")
+		w.WriteHeader(http.StatusOK)
 	default:
 		http.Error(w, "not implemented", http.StatusNotImplemented)
 	}
