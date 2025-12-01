@@ -1,0 +1,58 @@
+project_name: mimic
+builds:
+  - id: mimic_win
+    main: ./cmd/main
+    goos:
+      - windows
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=0
+
+  - id: mimic_linux
+    main: ./cmd/main
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+archives:
+  - id: linux_tar
+    builds: [build_linux]
+    format: tar.gz
+    files:
+      - example-config.toml
+      - scripts/install.sh
+      - scripts/systemd/mimic.service
+      - README.md
+      - LICENSE
+    wrap_in_directory: true
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}-{{ .Version }}"
+
+  - id: windows_zip
+    builds: [build_windows]
+    format: zip
+    files:
+      - example-config.toml
+      - scripts/install.ps1
+      - windows/WinFsp-*.msi
+      - README.md
+      - LICENSE
+    wrap_in_directory: true
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}-{{ .Version }}"
+
+checksum:
+  name_template: "checksums.txt"
+signs: []
+snapshot:
+  name_template: "{{ .Tag }}-snapshot"
+changelog:
+  use: git
+release:
+  github:
+    owner: yur4uwe
+    name: mimic
+  draft: true
+  prerelease: true

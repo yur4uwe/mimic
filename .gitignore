@@ -4,3 +4,4 @@ build/*
 *.toml
 *.log
 !example-config.toml
+dist/
