@@ -13,20 +13,11 @@ import (
 )
 
 func main() {
-	cfg, args, err := config.ParseCommandLineArgs()
+	cfg, err := config.ParseCommandLineArgs()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "failed to parse config/flags:", err)
 		os.Exit(2)
 	}
-
-	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "Error: missing required positional arguments: <mountpoint> <server>")
-		flag.Usage()
-		os.Exit(2)
-	}
-
-	mountpoint := args[0]
-	server := args[1]
 
 	if cfg.Username == "" || cfg.Password == "" {
 		fmt.Fprintln(os.Stderr, "Error: missing credentials; provide -u username:password or set in config")
@@ -35,7 +26,7 @@ func main() {
 	}
 
 	if cfg.Verbose {
-		fmt.Printf("mount=%q server=%q user=%q ttl=%s maxEntries=%d\n", mountpoint, server, cfg.Username, cfg.TTL, cfg.MaxEntries)
+		fmt.Printf("mount=%q server=%q user=%q ttl=%s maxEntries=%d\n", cfg.Mountpoint, cfg.URL, cfg.Username, cfg.TTL, cfg.MaxEntries)
 	}
 
 	logger, err := logger.New(cfg.Verbose, cfg.StdLog, cfg.ErrLog)
@@ -46,11 +37,11 @@ func main() {
 	defer logger.Close()
 	cache := cache.NewNodeCache(cfg.TTL, cfg.MaxEntries)
 
-	webdavClient := wrappers.NewWebdavClient(cache, server, cfg.Username, cfg.Password, true)
+	webdavClient := wrappers.NewWebdavClient(cache, cfg.URL, cfg.Username, cfg.Password, true)
 	filesystem := fs.New(webdavClient, logger)
 
 	defer filesystem.Unmount()
-	if err := filesystem.Mount(mountpoint, []string{}); err != nil {
+	if err := filesystem.Mount(cfg.Mountpoint, []string{}); err != nil {
 		logger.Errorf("Mount failed: %v", err)
 		os.Exit(1)
 	}

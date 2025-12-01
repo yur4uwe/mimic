@@ -1,3 +1,11 @@
+# location to mount remote filesystem
+# - folder should exist
+# - on Windows you can mount volumes (e.g. "X:\")
+mpoint = "/mnt/mimic"
+
+# server hosting webdav
+url = "https://webdav.exaple.com"
+
 # server credentials
 username = "user"
 password = "pass"

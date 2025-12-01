@@ -120,7 +120,7 @@ func usage() {
 	flag.PrintDefaults()
 }
 
-func ParseCommandLineArgs() (*Config, []string, error) {
+func ParseCommandLineArgs() (*Config, error) {
 	var (
 		configFPtr    = flag.StringP("config", "c", "", "path to config file")
 		userPtr       = flag.StringP("user", "u", "", "username:password (shorthand)")
@@ -137,13 +137,13 @@ func ParseCommandLineArgs() (*Config, []string, error) {
 
 	cfg, err := ParseConfig(*configFPtr)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	if *wherePtr {
 		p, perr := userConfigPath("mimic", "config.toml")
 		if perr != nil {
-			return nil, nil, perr
+			return nil, perr
 		}
 		fmt.Println(p)
 		os.Exit(0)
@@ -174,5 +174,13 @@ func ParseCommandLineArgs() (*Config, []string, error) {
 
 	args := flag.Args()
 
-	return cfg, args, nil
+	if len(args) == 2 && cfg.Mountpoint == "" {
+		cfg.Mountpoint = args[0]
+	}
+
+	if len(args) == 2 && cfg.URL == "" {
+		cfg.URL = args[1]
+	}
+
+	return cfg, nil
 }
