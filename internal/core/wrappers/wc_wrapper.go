@@ -1,10 +1,8 @@
 package wrappers
 
 import (
-	"bytes"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path"
 	"strings"
@@ -13,12 +11,10 @@ import (
 	"github.com/studio-b12/gowebdav"
 )
 
-// WebdavClient is a small wrapper around gowebdav.Client that
-// provides the methods the filesystem expects
 type WebdavClient struct {
 	client *gowebdav.Client
 	cache  *cache.NodeCache
-	// base info for performing custom HTTP requests (partial PUT)
+
 	baseURL         string
 	username        string
 	password        string
@@ -27,7 +23,15 @@ type WebdavClient struct {
 
 const streamThreshold = 4 * 1024 * 1024 // 4 MB
 
-func NewWebdavClient(client *gowebdav.Client, cache *cache.NodeCache, baseURL, username, password string, allowPartialPut bool) *WebdavClient {
+func NewWebdavClient(cache *cache.NodeCache, baseURL, username, password string, allowPartialPut bool) *WebdavClient {
+	client := gowebdav.NewClient(baseURL, username, password)
+	fmt.Println("Trying to connect to the server...")
+	if err := client.Connect(); err != nil {
+		fmt.Fprintln(os.Stderr, "webdav client: couldn't connect to the server:", err)
+		os.Exit(1)
+	}
+	fmt.Println("Server health check successful")
+
 	return &WebdavClient{
 		client:          client,
 		cache:           cache,
@@ -85,94 +89,6 @@ func (w *WebdavClient) ReadRange(name string, offset, length int64) (io.ReadClos
 	return w.client.ReadStreamRange(name, offset, length)
 }
 
-// commit centralizes write vs stream decision and cache invalidation.
-func (w *WebdavClient) commit(name string, offset int64, data []byte) error {
-	if strings.HasSuffix(name, "/") && name != "/" {
-		name = strings.TrimSuffix(name, "/")
-	}
-
-	defer w.cache.Invalidate(name)
-	// If an offset was provided, try a partial PUT using Content-Range.
-	// This is non-standard but some servers (including some Apache setups)
-	// accept it. If it succeeds (2xx) we return success; otherwise fall
-	// back to the regular full-file write.
-	if offset > 0 && w.baseURL != "" && w.allowPartialPut {
-		if ok, err := w.tryPartialPut(name, offset, data); ok {
-			return nil
-		} else if err != nil {
-			// ignore error and fall back to full write
-			_ = err
-		}
-	}
-
-	var err error
-	if len(data) > streamThreshold {
-		err = w.client.WriteStream(name, bytes.NewReader(data), 0644)
-	} else {
-		err = w.client.Write(name, data, 0644)
-	}
-	return err
-}
-
-// tryPartialPut attempts a non-standard partial PUT using Content-Range header.
-// Returns (true, nil) if the server accepted the partial update (2xx),
-// (false, nil) if server rejected (non-2xx), or (false, err) on network error.
-func (w *WebdavClient) tryPartialPut(name string, offset int64, data []byte) (bool, error) {
-	// build URL
-	base := strings.TrimRight(w.baseURL, "/")
-	path := strings.TrimLeft(name, "/")
-	url := base + "/" + path
-
-	req, err := http.NewRequest("PUT", url, bytes.NewReader(data))
-	if err != nil {
-		return false, err
-	}
-
-	// Content-Range: bytes <start>-<end>/<total or *>
-	end := offset + int64(len(data)) - 1
-	req.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/*", offset, end))
-
-	if w.username != "" {
-		req.SetBasicAuth(w.username, w.password)
-	}
-
-	// Use a short-lived http.Client; reusing gowebdav transport would be ideal
-	// but it's not exposed from the client. Keep default settings.
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return false, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return true, nil
-	}
-	return false, nil
-}
-
-func (w *WebdavClient) fetch(name string) ([]byte, error) {
-	if strings.HasSuffix(name, "/") && name != "/" {
-		name = strings.TrimSuffix(name, "/")
-	}
-
-	// Always read the whole file (prefer streaming), then return a prefix if requested.
-	if rc, err := w.client.ReadStream(name); err == nil {
-		defer rc.Close()
-		data, err := io.ReadAll(rc)
-		if err != nil {
-			return nil, err
-		}
-		return data, nil
-	}
-
-	all, err := w.client.Read(name)
-	if err != nil {
-		return nil, err
-	}
-	return all, nil
-}
-
 func (w *WebdavClient) Write(name string, data []byte) error {
 	return w.commit(name, 0, data)
 }
@@ -213,7 +129,6 @@ func (w *WebdavClient) Create(name string) error {
 	if strings.HasSuffix(name, "/") {
 		return &os.PathError{Op: "create", Path: name, Err: os.ErrInvalid}
 	}
-	// invalidate parent dir listings after create
 	parent := path.Dir(strings.TrimRight(name, "/"))
 	if parent == "." {
 		parent = "/"
@@ -223,7 +138,6 @@ func (w *WebdavClient) Create(name string) error {
 }
 
 func (w *WebdavClient) Remove(name string) error {
-	// invalidate parent dir listings after remove
 	parent := path.Dir(strings.TrimRight(name, "/"))
 	if parent == "." {
 		parent = "/"
@@ -234,7 +148,6 @@ func (w *WebdavClient) Remove(name string) error {
 }
 
 func (w *WebdavClient) Mkdir(name string, mode os.FileMode) error {
-	// invalidate parent dir listings after mkdir
 	parent := path.Dir(strings.TrimRight(name, "/"))
 	if parent == "." {
 		parent = "/"
@@ -245,7 +158,6 @@ func (w *WebdavClient) Mkdir(name string, mode os.FileMode) error {
 }
 
 func (w *WebdavClient) Rmdir(name string) error {
-	// invalidate parent dir listings after rmdir
 	parent := path.Dir(strings.TrimRight(name, "/"))
 	if parent == "." {
 		parent = "/"
@@ -256,7 +168,6 @@ func (w *WebdavClient) Rmdir(name string) error {
 }
 
 func (w *WebdavClient) Rename(oldname, newname string) error {
-	// invalidate parent dirs of both source and destination
 	oldParent := path.Dir(strings.TrimRight(oldname, "/"))
 	if oldParent == "." {
 		oldParent = "/"
@@ -265,10 +176,7 @@ func (w *WebdavClient) Rename(oldname, newname string) error {
 	if newParent == "." {
 		newParent = "/"
 	}
-	defer w.cache.InvalidateTree(oldParent + "/")
-	defer w.cache.InvalidateTree(newParent + "/")
 
-	// still invalidate trees for the entries themselves
 	defer w.cache.InvalidateTree(oldname)
 	defer w.cache.InvalidateTree(newname)
 	return w.client.Rename(oldname, newname, true)
@@ -334,4 +242,14 @@ func (w *WebdavClient) Truncate(name string, size int64) error {
 	buf := make([]byte, size)
 	copy(buf, existing)
 	return w.commit(name, 0, buf)
+}
+
+func (w *WebdavClient) Lock(name string) error {
+	// no-op for WebDAV
+	return nil
+}
+
+func (w *WebdavClient) Unlock(name string) error {
+	// no-op for WebDAV
+	return nil
 }

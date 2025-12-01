@@ -2,6 +2,7 @@ package linux
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -26,10 +27,10 @@ type FuseFS struct {
 	mounted    bool
 }
 
-func New(wc interfaces.WebClient, logger logger.FullLogger) *FuseFS {
+func New(wc interfaces.WebClient, log logger.FullLogger) *FuseFS {
 	return &FuseFS{
 		client: wc,
-		logger: logger,
+		logger: log,
 	}
 }
 
@@ -49,7 +50,7 @@ func (fs *FuseFS) Mount(mountpoint string, mflags []string) error {
 		return fmt.Errorf("cannot access mountpoint %q: %w", mountpoint, err)
 	}
 
-	fs.logger.Log("Mounting...")
+	log.Printf("Mounting...")
 	c, err := fuse.Mount(
 		mountpoint,
 		fuse.FSName("mimic"),
@@ -58,7 +59,7 @@ func (fs *FuseFS) Mount(mountpoint string, mflags []string) error {
 	if err != nil {
 		return fmt.Errorf("fuse mount failed: %w", err)
 	}
-	fs.logger.Log("Mounted, starting server...")
+	log.Printf("Mounted, starting server...")
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)
 
@@ -66,7 +67,7 @@ func (fs *FuseFS) Mount(mountpoint string, mflags []string) error {
 		fusefs.Serve(c, fs)
 	}()
 
-	fs.logger.Log("Fuse is serving")
+	log.Printf("Fuse is serving")
 	<-sigChan
 
 	// store runtime state for Unmount
@@ -74,7 +75,7 @@ func (fs *FuseFS) Mount(mountpoint string, mflags []string) error {
 	fs.conn = c
 	fs.mounted = true
 
-	fs.logger.Logf("Mounted Fuse on %s", mountpoint)
+	log.Printf("Mounted Fuse on %s", mountpoint)
 	return nil
 }
 
@@ -101,9 +102,9 @@ func (fs *FuseFS) Unmount() error {
 	if err := fuse.Unmount(mp); err != nil {
 		// Unmount can fail when processes keep files open. Try a lazy unmount fallback,
 		// and log the error so operator can take manual action (fuser/kill).
-		fs.logger.Errorf("fuse.Unmount error: %v", err)
+		log.Printf("fuse.Unmount error: %v", err)
 		if ex := exec.Command("fusermount3", "-uz", mp).Run(); ex != nil {
-			fs.logger.Errorf("fusermount3 -uz failed: %v", ex)
+			log.Printf("fusermount3 -uz failed: %v", ex)
 		}
 	}
 
@@ -112,14 +113,14 @@ func (fs *FuseFS) Unmount() error {
 	}
 
 	if serveErr != nil {
-		fs.logger.Errorf("fs.Serve returned error: %v", serveErr)
+		log.Printf("fs.Serve returned error: %v", serveErr)
 	}
 
-	fs.logger.Logf("Unmounted %s", mp)
+	log.Printf("Unmounted %s", mp)
 	return nil
 }
 
 func (fs *FuseFS) Root() (fusefs.Node, error) {
-	fs.logger.Log("Root called")
+	log.Printf("Root called")
 	return entries.NewNode(fs.client, fs.logger, "/"), nil
 }

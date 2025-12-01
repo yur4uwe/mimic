@@ -10,7 +10,6 @@ import (
 	"github.com/mimic/internal/core/wrappers"
 	"github.com/mimic/internal/fs"
 	flag "github.com/spf13/pflag"
-	"github.com/studio-b12/gowebdav"
 )
 
 func main() {
@@ -39,14 +38,6 @@ func main() {
 		fmt.Printf("mount=%q server=%q user=%q ttl=%s maxEntries=%d\n", mountpoint, server, cfg.Username, cfg.TTL, cfg.MaxEntries)
 	}
 
-	client := gowebdav.NewClient(server, cfg.Username, cfg.Password)
-	fmt.Println("Trying to connect to the server...")
-	if err := client.Connect(); err != nil {
-		fmt.Fprintln(os.Stderr, "webdav client: couldn't connect to the server:", err)
-		os.Exit(1)
-	}
-	fmt.Println("Server health check successful")
-
 	logger, err := logger.New(cfg.Verbose, cfg.StdLog, cfg.ErrLog)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "failed to initialize logger:", err)
@@ -55,7 +46,7 @@ func main() {
 	defer logger.Close()
 	cache := cache.NewNodeCache(cfg.TTL, cfg.MaxEntries)
 
-	webdavClient := wrappers.NewWebdavClient(client, cache, server, cfg.Username, cfg.Password, true)
+	webdavClient := wrappers.NewWebdavClient(cache, server, cfg.Username, cfg.Password, true)
 	filesystem := fs.New(webdavClient, logger)
 
 	defer filesystem.Unmount()

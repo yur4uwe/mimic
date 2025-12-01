@@ -9,16 +9,13 @@ import (
 	"github.com/mimic/internal/core/cache"
 	"github.com/mimic/internal/core/wrappers"
 	"github.com/mimic/test/utils/memserver"
-	"github.com/studio-b12/gowebdav"
 )
 
 func newWrapperWithServer(t *testing.T) (*wrappers.WebdavClient, *memserver.MemBackend, func()) {
 	t.Helper()
 	srv, backend := memserver.NewTestServer()
-	c := gowebdav.NewClient(srv.URL, "", "")
-	c.SetTimeout(5 * time.Second)
 	cache := cache.NewNodeCache(1*time.Minute, 100)
-	wc := wrappers.NewWebdavClient(c, cache, srv.URL, "", "", false)
+	wc := wrappers.NewWebdavClient(cache, srv.URL, "", "", false)
 	cleanup := func() { srv.Close() }
 	return wc, backend, cleanup
 }
