@@ -37,30 +37,13 @@ func davRequest(method, url, uname, pass string, body io.Reader, headers map[str
 	return resp.StatusCode, data, nil
 }
 
-func (w *WebdavClient) commit(name string, offset int64, data []byte) error {
-	if strings.HasSuffix(name, "/") && name != "/" {
-		name = strings.TrimSuffix(name, "/")
-	}
-
+func (w *WebdavClient) commit(name string, data []byte) error {
 	defer w.cache.Invalidate(name)
-	// If an offset was provided, try a partial PUT using Content-Range.
-	// This is non-standard but some servers (including some Apache setups)
-	// accept it. If it succeeds (2xx) we return success; otherwise fall
-	// back to the regular full-file write.
-	if offset > 0 && w.baseURL != "" && w.allowPartialPut {
-		// ignore error and fallback to full write
-		if ok, _ := w.tryPartialPut(name, offset, data); ok {
-			return nil
-		}
-	}
-
-	var err error
 	if len(data) > streamThreshold {
-		err = w.client.WriteStream(name, bytes.NewReader(data), 0644)
+		return w.client.WriteStream(name, bytes.NewReader(data), 0644)
 	} else {
-		err = w.client.Write(name, data, 0644)
+		return w.client.Write(name, data, 0644)
 	}
-	return err
 }
 
 // tryPartialPut attempts a non-standard partial PUT using Content-Range header.
@@ -71,7 +54,7 @@ func (w *WebdavClient) tryPartialPut(name string, offset int64, data []byte) (bo
 
 	// Content-Range: bytes <start>-<end>
 	end := offset + int64(len(data)) - 1
-	crange := fmt.Sprintf("bytes %d-%d", offset, end)
+	crange := fmt.Sprintf("bytes %d-%d/*", offset, end)
 	headers := map[string]string{
 		"Content-Range": crange,
 	}

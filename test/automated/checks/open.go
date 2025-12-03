@@ -75,7 +75,6 @@ func CheckOpenFlags(base string) (retErr error) {
 		retErr = err
 		goto cleanup
 	}
-	fmt.Println(b)
 	if !bytes.Contains(b, []byte("WO")) {
 		retErr = errors.New("O_WRONLY did not write as expected")
 		goto cleanup

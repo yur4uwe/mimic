@@ -37,7 +37,7 @@ func main() {
 	defer logger.Close()
 	cache := cache.NewNodeCache(cfg.TTL, cfg.MaxEntries)
 
-	webdavClient := wrappers.NewWebdavClient(cache, cfg.URL, cfg.Username, cfg.Password, true)
+	webdavClient := wrappers.NewWebdavClient(cache, cfg.URL, cfg.Username, cfg.Password)
 	filesystem := fs.New(webdavClient, logger)
 
 	defer filesystem.Unmount()

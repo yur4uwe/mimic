@@ -18,15 +18,14 @@ type WebdavClient struct {
 	cache  *cache.NodeCache
 	lm     *locking.LockManager
 
-	baseURL         string
-	username        string
-	password        string
-	allowPartialPut bool
+	baseURL  string
+	username string
+	password string
 }
 
 const streamThreshold = 4 * 1024 * 1024 // 4 MB
 
-func NewWebdavClient(cache *cache.NodeCache, baseURL, username, password string, allowPartialPut bool) *WebdavClient {
+func NewWebdavClient(cache *cache.NodeCache, baseURL, username, password string) *WebdavClient {
 	client := gowebdav.NewClient(baseURL, username, password)
 	fmt.Println("Trying to connect to the server...")
 	if err := client.Connect(); err != nil {
@@ -36,13 +35,12 @@ func NewWebdavClient(cache *cache.NodeCache, baseURL, username, password string,
 	fmt.Println("Server health check successful")
 
 	return &WebdavClient{
-		client:          client,
-		cache:           cache,
-		baseURL:         baseURL,
-		username:        username,
-		password:        password,
-		allowPartialPut: allowPartialPut,
-		lm:              locking.NewLockManager(),
+		client:   client,
+		cache:    cache,
+		baseURL:  baseURL,
+		username: username,
+		password: password,
+		lm:       locking.NewLockManager(),
 	}
 }
 
@@ -94,22 +92,14 @@ func (w *WebdavClient) ReadRange(name string, offset, length int64) (io.ReadClos
 }
 
 func (w *WebdavClient) Write(name string, data []byte) error {
-	return w.commit(name, 0, data)
+	return w.commit(name, data)
 }
 
 func (w *WebdavClient) WriteOffset(name string, data []byte, offset int64) error {
-	// If partial PUTs are enabled, delegate to commit (which will try partial PUT).
-	if w.allowPartialPut {
-		return w.commit(name, offset, data)
-	}
-
-	// Otherwise, fall back to server-agnostic behavior: fetch existing content,
-	// merge the new data at the requested offset and upload the full result.
-	// This preserves correct semantics on servers that don't support partial PUT.
 	existing, err := w.fetch(name)
 	if err != nil {
 		if os.IsNotExist(err) && offset == 0 {
-			return w.commit(name, 0, data)
+			return w.commit(name, data)
 		}
 		return err
 	}
@@ -126,7 +116,7 @@ func (w *WebdavClient) WriteOffset(name string, data []byte, offset int64) error
 		copy(merged[offset:], data)
 	}
 
-	return w.commit(name, 0, merged)
+	return w.commit(name, merged)
 }
 
 func (w *WebdavClient) Create(name string) error {
@@ -137,8 +127,8 @@ func (w *WebdavClient) Create(name string) error {
 	if parent == "." {
 		parent = "/"
 	}
-	defer w.cache.InvalidateTree(parent + "/")
-	return w.commit(name, 0, []byte{})
+	defer w.cache.Invalidate(parent)
+	return w.commit(name, []byte{})
 }
 
 func (w *WebdavClient) Remove(name string) error {
@@ -183,6 +173,22 @@ func (w *WebdavClient) Rename(oldname, newname string) error {
 
 	defer w.cache.InvalidateTree(oldname)
 	defer w.cache.InvalidateTree(newname)
+
+	// Try a custom MOVE request with a path-only Destination to avoid host/scheme mismatches
+	if w.baseURL != "" {
+		url := buildURL(w.baseURL, oldname)
+		headers := map[string]string{
+			"Destination": newname,
+			"Overwrite":   "T",
+		}
+
+		code, _, err := davRequest("MOVE", url, w.username, w.password, nil, headers)
+		if err == nil && code >= 200 && code < 300 {
+			return nil
+		}
+		// Fall through to gowebdav rename on network error or non-2xx responses
+	}
+
 	return w.client.Rename(oldname, newname, true)
 }
 
@@ -219,7 +225,7 @@ func (w *WebdavClient) Truncate(name string, size int64) error {
 		// if not exists and size > 0 create zero-filled
 		if os.IsNotExist(err) {
 			buf := make([]byte, size)
-			return w.commit(name, 0, buf)
+			return w.commit(name, buf)
 		}
 		return err
 	}
@@ -235,17 +241,17 @@ func (w *WebdavClient) Truncate(name string, size int64) error {
 			copy(padded, existing)
 			existing = padded
 		}
-		return w.commit(name, 0, existing)
+		return w.commit(name, existing)
 	}
 
 	if int64(len(existing)) >= size {
 		// already >= size (shouldn't happen due to earlier check) but handle defensively
-		return w.commit(name, 0, existing[:size])
+		return w.commit(name, existing[:size])
 	}
 
 	buf := make([]byte, size)
 	copy(buf, existing)
-	return w.commit(name, 0, buf)
+	return w.commit(name, buf)
 }
 
 // Range-locking API used by FS layer. These are intentionally not part of

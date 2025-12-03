@@ -15,7 +15,7 @@ func newWrapperWithServer(t *testing.T) (*wrappers.WebdavClient, *memserver.MemB
 	t.Helper()
 	srv, backend := memserver.NewTestServer()
 	cache := cache.NewNodeCache(1*time.Minute, 100)
-	wc := wrappers.NewWebdavClient(cache, srv.URL, "", "", false)
+	wc := wrappers.NewWebdavClient(cache, srv.URL, "", "")
 	cleanup := func() { srv.Close() }
 	return wc, backend, cleanup
 }

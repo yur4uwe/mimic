@@ -40,8 +40,9 @@ retry:
 		goto cleanup
 	}
 	if info.Size() < 10*1024*1024 {
+		fmt.Printf("Incorrect size %d, trying again\n", info.Size())
 		if retries == 0 {
-			retErr = fmt.Errorf("Failed to correctly stat a file after 5 tries")
+			retErr = fmt.Errorf("failed to correctly stat a file after 5 tries")
 			goto cleanup
 		}
 		retries--
