@@ -4,6 +4,7 @@ package entries
 
 import (
 	"context"
+	"fmt"
 	"hash/crc32"
 	"os"
 	"syscall"
@@ -11,6 +12,7 @@ import (
 	"bazil.org/fuse"
 	"github.com/mimic/internal/core/casters"
 	"github.com/mimic/internal/core/flags"
+	"github.com/mimic/internal/core/locking"
 	"github.com/mimic/internal/core/logger"
 	"github.com/mimic/internal/fs/common"
 	"github.com/mimic/internal/interfaces"
@@ -203,23 +205,60 @@ func (h *Handle) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
 	return nil
 }
 
-// Lock tries to acquire a lock on a byte range of the node. If a
-// conflicting lock is already held, returns syscall.EAGAIN.
-//
-// LockRequest.LockOwner is a file-unique identifier for this
-// lock, and will be seen in calls releasing this lock
-// (UnlockRequest, ReleaseRequest, FlushRequest) and also
-// in e.g. ReadRequest, WriteRequest.
-func (h *Handle) Lock(ctx context.Context, req *fuse.LockRequest) error
+func getLockOwner(reqOwner fuse.LockOwner) []byte {
+	if reqOwner != 0 {
+		return []byte(fmt.Sprintf("%d", reqOwner))
+	}
+	return []byte(fmt.Sprintf("pid:%d", os.Getpid()))
+}
 
-// LockWait acquires a lock on a byte range of the node, waiting
-// until the lock can be obtained (or context is canceled).
-func (h *Handle) LockWait(ctx context.Context, req *fuse.LockWaitRequest) error
+func (h *Handle) Lock(ctx context.Context, req *fuse.LockRequest) error {
+	owner := getLockOwner(req.LockOwner)
 
-// Unlock releases the lock on a byte range of the node. Locks can
-// be released also implicitly, see HandleFlockLocker and
-// HandlePOSIXLocker.
-func (h *Handle) Unlock(ctx context.Context, req *fuse.UnlockRequest) error
+	start := req.Lock.Start
+	end := req.Lock.End
+	ltype := locking.LockType(req.Lock.Type)
+
+	if err := h.wc.Lock(h.Path(), owner, start, end, ltype); err != nil {
+		if err == locking.ErrWouldBlock {
+			return syscall.Errno(syscall.EAGAIN)
+		}
+		return syscall.Errno(syscall.EIO)
+	}
+	return nil
+}
+
+func (h *Handle) LockWait(ctx context.Context, req *fuse.LockWaitRequest) error {
+	owner := getLockOwner(req.LockOwner)
+
+	start := req.Lock.Start
+	end := req.Lock.End
+	// derive locking type from incoming request; default to write lock
+	ltype := locking.LockType(req.Lock.Type)
+	if ltype == 0 {
+		ltype = locking.F_WRLCK
+	}
+
+	if err := h.wc.LockWait(ctx, h.Path(), owner, start, end, ltype); err != nil {
+		return syscall.Errno(syscall.EIO)
+	}
+	return nil
+}
+
+func (h *Handle) Unlock(ctx context.Context, req *fuse.UnlockRequest) error {
+	owner := getLockOwner(req.LockOwner)
+
+	start := req.Lock.Start
+	end := req.Lock.End
+
+	if err := h.wc.Unlock(h.Path(), owner, start, end); err != nil {
+		if err == locking.ErrNotOwner {
+			return syscall.Errno(syscall.EACCES)
+		}
+		return syscall.Errno(syscall.EIO)
+	}
+	return nil
+}
 
 // QueryLock returns the current state of locks held for the byte
 // range of the node.
@@ -229,4 +268,18 @@ func (h *Handle) Unlock(ctx context.Context, req *fuse.UnlockRequest) error
 // To simplify implementing this method, resp.Lock is prefilled to
 // have Lock.Type F_UNLCK, and the whole struct should be
 // overwritten for in case of conflicting locks.
-func (h *Handle) QueryLock(ctx context.Context, req *fuse.QueryLockRequest, resp *fuse.QueryLockResponse) error
+func (h *Handle) QueryLock(ctx context.Context, req *fuse.QueryLockRequest, resp *fuse.QueryLockResponse) error {
+	start := req.Lock.Start
+	end := req.Lock.End
+
+	lock := h.wc.Query(h.Path(), start, end)
+	if lock == nil {
+		return nil
+	}
+
+	resp.Lock.Type = fuse.LockType(lock.Type)
+	resp.Lock.PID = int32(lock.PID)
+	resp.Lock.Start = start
+	resp.Lock.End = end
+	return nil
+}

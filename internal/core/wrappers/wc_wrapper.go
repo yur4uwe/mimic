@@ -248,31 +248,22 @@ func (w *WebdavClient) Truncate(name string, size int64) error {
 	return w.commit(name, 0, buf)
 }
 
-func (w *WebdavClient) Lock(name string) error {
-	// backward compatible noop single-name lock; use full-file exclusive lock
-	return w.lm.Acquire(name, []byte("default"), 0, 0, locking.F_WRLCK)
-}
-
-func (w *WebdavClient) Unlock(name string) error {
-	return w.lm.Release(name, []byte("default"), 0, 0)
-}
-
 // Range-locking API used by FS layer. These are intentionally not part of
 // interfaces.WebClient to avoid breaking the interface; the FS will type-assert
 // to use them when present.
-func (w *WebdavClient) LockRange(name string, owner []byte, start, end int64, lockType locking.LockType) error {
+func (w *WebdavClient) Lock(name string, owner []byte, start, end uint64, lockType locking.LockType) error {
 	return w.lm.Acquire(name, owner, start, end, lockType)
 }
 
-func (w *WebdavClient) LockRangeWait(ctx context.Context, name string, owner []byte, start, end int64, lockType locking.LockType) error {
+func (w *WebdavClient) LockWait(ctx context.Context, name string, owner []byte, start, end uint64, lockType locking.LockType) error {
 	return w.lm.AcquireWait(ctx, name, owner, start, end, lockType)
 }
 
-func (w *WebdavClient) UnlockRange(name string, owner []byte, start, end int64) error {
+func (w *WebdavClient) Unlock(name string, owner []byte, start, end uint64) error {
 	return w.lm.Release(name, owner, start, end)
 }
 
-func (w *WebdavClient) QueryRange(name string, start, end int64) (owner []byte, pid int, lockType locking.LockType, ok bool) {
+func (w *WebdavClient) Query(name string, start, end uint64) (owner []byte, pid int, lockType locking.LockType, ok bool) {
 	info, found := w.lm.Query(name, start, end)
 	if !found {
 		return nil, 0, locking.F_UNLCK, false

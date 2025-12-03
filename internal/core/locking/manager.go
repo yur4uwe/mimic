@@ -17,9 +17,9 @@ type LockType int16
 // LockInfo describes an active lock
 type LockInfo struct {
 	Owner []byte
-	Start int64
-	End   int64
-	Type  LockType // F_RDLCK / F_WRLCK
+	Start uint64
+	End   uint64
+	Type  LockType
 	PID   int
 }
 
@@ -60,18 +60,18 @@ func (lm *LockManager) getList(key string) *lockList {
 	return l
 }
 
-func overlap(aStart, aEnd, bStart, bEnd int64) bool {
+func overlap(aStart, aEnd, bStart, bEnd uint64) bool {
 	if aEnd <= 0 {
-		aEnd = int64(^uint64(0) >> 1) // large
+		aEnd = uint64(^uint64(0) >> 1) // large
 	}
 	if bEnd <= 0 {
-		bEnd = int64(^uint64(0) >> 1)
+		bEnd = uint64(^uint64(0) >> 1)
 	}
 	return aStart < bEnd && bStart < aEnd
 }
 
 // Acquire tries to acquire a lock non-blocking. Returns ErrWouldBlock if conflict.
-func (lm *LockManager) Acquire(key string, owner []byte, start, end int64, lockType LockType) error {
+func (lm *LockManager) Acquire(key string, owner []byte, start, end uint64, lockType LockType) error {
 	l := lm.getList(key)
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -91,7 +91,7 @@ func (lm *LockManager) Acquire(key string, owner []byte, start, end int64, lockT
 }
 
 // AcquireWait waits until the lock can be acquired or context is cancelled.
-func (lm *LockManager) AcquireWait(ctx context.Context, key string, owner []byte, start, end int64, lockType LockType) error {
+func (lm *LockManager) AcquireWait(ctx context.Context, key string, owner []byte, start, end uint64, lockType LockType) error {
 	l := lm.getList(key)
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -133,7 +133,7 @@ func (lm *LockManager) AcquireWait(ctx context.Context, key string, owner []byte
 }
 
 // Release releases locks that match owner and overlapping range. Returns ErrNotOwner if no matching lock.
-func (lm *LockManager) Release(key string, owner []byte, start, end int64) error {
+func (lm *LockManager) Release(key string, owner []byte, start, end uint64) error {
 	l := lm.getList(key)
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -156,7 +156,7 @@ func (lm *LockManager) Release(key string, owner []byte, start, end int64) error
 }
 
 // Query returns one conflicting lock (if any). Returns (info, true) if conflict exists.
-func (lm *LockManager) Query(key string, start, end int64) (LockInfo, bool) {
+func (lm *LockManager) Query(key string, start, end uint64) (LockInfo, bool) {
 	l := lm.getList(key)
 	l.mu.Lock()
 	defer l.mu.Unlock()
