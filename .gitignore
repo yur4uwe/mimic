@@ -5,3 +5,4 @@ build/*
 *.log
 !example-config.toml
 dist/
+latest

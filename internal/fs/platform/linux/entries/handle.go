@@ -105,9 +105,9 @@ func (h *Handle) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.W
 		return syscall.Errno(syscall.EACCES)
 	}
 
-	h.Lock()
+	h.MLock()
 	h.AddToBuffer(req.Offset, req.Data)
-	h.Unlock()
+	h.MUnlock()
 
 	resp.Size = len(req.Data)
 	return nil
@@ -153,7 +153,7 @@ func (h *Handle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 		return nil
 	}
 
-	h.Lock()
+	h.MLock()
 	buf, off := h.Buffer()
 	if buf != nil {
 		// Attempt to write the anchored buffer using WriteOffset. The
@@ -166,26 +166,26 @@ func (h *Handle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 				end := off + int64(len(buf))
 				if end > int64(^uint(0)>>1) {
 					h.logger.Logf("(Handle) [Flush] too large allocate for %s; returning EIO", h.Path())
-					h.Unlock()
+					h.MUnlock()
 					return syscall.Errno(syscall.EIO)
 				}
 				full := make([]byte, int(end))
 				copy(full[int(off):], buf)
 				if werr := h.wc.Write(h.Path(), full); werr != nil {
 					h.logger.Logf("(Handle) [Flush] client.Write error for %s: %v; returning EIO", h.Path(), werr)
-					h.Unlock()
+					h.MUnlock()
 					return syscall.Errno(syscall.EIO)
 				}
 			} else {
 				h.logger.Logf("(Handle) [Flush] client.WriteOffset error for %s: %v; returning EIO", h.Path(), err)
-				h.Unlock()
+				h.MUnlock()
 				return syscall.Errno(syscall.EIO)
 			}
 		}
 		// clear buffer on success
 		h.ClearBuffer()
 	}
-	h.Unlock()
+	h.MUnlock()
 	return nil
 }
 
@@ -202,3 +202,31 @@ func (h *Handle) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
 
 	return nil
 }
+
+// Lock tries to acquire a lock on a byte range of the node. If a
+// conflicting lock is already held, returns syscall.EAGAIN.
+//
+// LockRequest.LockOwner is a file-unique identifier for this
+// lock, and will be seen in calls releasing this lock
+// (UnlockRequest, ReleaseRequest, FlushRequest) and also
+// in e.g. ReadRequest, WriteRequest.
+func (h *Handle) Lock(ctx context.Context, req *fuse.LockRequest) error
+
+// LockWait acquires a lock on a byte range of the node, waiting
+// until the lock can be obtained (or context is canceled).
+func (h *Handle) LockWait(ctx context.Context, req *fuse.LockWaitRequest) error
+
+// Unlock releases the lock on a byte range of the node. Locks can
+// be released also implicitly, see HandleFlockLocker and
+// HandlePOSIXLocker.
+func (h *Handle) Unlock(ctx context.Context, req *fuse.UnlockRequest) error
+
+// QueryLock returns the current state of locks held for the byte
+// range of the node.
+//
+// See QueryLockRequest for details on how to respond.
+//
+// To simplify implementing this method, resp.Lock is prefilled to
+// have Lock.Type F_UNLCK, and the whole struct should be
+// overwritten for in case of conflicting locks.
+func (h *Handle) QueryLock(ctx context.Context, req *fuse.QueryLockRequest, resp *fuse.QueryLockResponse) error

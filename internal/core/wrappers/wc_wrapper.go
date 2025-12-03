@@ -1,6 +1,7 @@
 package wrappers
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -8,12 +9,14 @@ import (
 	"strings"
 
 	"github.com/mimic/internal/core/cache"
+	"github.com/mimic/internal/core/locking"
 	"github.com/studio-b12/gowebdav"
 )
 
 type WebdavClient struct {
 	client *gowebdav.Client
 	cache  *cache.NodeCache
+	lm     *locking.LockManager
 
 	baseURL         string
 	username        string
@@ -39,6 +42,7 @@ func NewWebdavClient(cache *cache.NodeCache, baseURL, username, password string,
 		username:        username,
 		password:        password,
 		allowPartialPut: allowPartialPut,
+		lm:              locking.NewLockManager(),
 	}
 }
 
@@ -245,11 +249,33 @@ func (w *WebdavClient) Truncate(name string, size int64) error {
 }
 
 func (w *WebdavClient) Lock(name string) error {
-	// no-op for WebDAV
-	return nil
+	// backward compatible noop single-name lock; use full-file exclusive lock
+	return w.lm.Acquire(name, []byte("default"), 0, 0, locking.F_WRLCK)
 }
 
 func (w *WebdavClient) Unlock(name string) error {
-	// no-op for WebDAV
-	return nil
+	return w.lm.Release(name, []byte("default"), 0, 0)
+}
+
+// Range-locking API used by FS layer. These are intentionally not part of
+// interfaces.WebClient to avoid breaking the interface; the FS will type-assert
+// to use them when present.
+func (w *WebdavClient) LockRange(name string, owner []byte, start, end int64, lockType locking.LockType) error {
+	return w.lm.Acquire(name, owner, start, end, lockType)
+}
+
+func (w *WebdavClient) LockRangeWait(ctx context.Context, name string, owner []byte, start, end int64, lockType locking.LockType) error {
+	return w.lm.AcquireWait(ctx, name, owner, start, end, lockType)
+}
+
+func (w *WebdavClient) UnlockRange(name string, owner []byte, start, end int64) error {
+	return w.lm.Release(name, owner, start, end)
+}
+
+func (w *WebdavClient) QueryRange(name string, start, end int64) (owner []byte, pid int, lockType locking.LockType, ok bool) {
+	info, found := w.lm.Query(name, start, end)
+	if !found {
+		return nil, 0, locking.F_UNLCK, false
+	}
+	return info.Owner, info.PID, info.Type, true
 }

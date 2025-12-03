@@ -70,10 +70,10 @@ func (fs *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle 
 		return -fuse.EACCES
 	}
 
-	file.Lock()
+	file.MLock()
 	// Add data into the handle buffer (will mark dirty via non-nil buffer)
 	file.AddToBuffer(offset, buffer)
-	file.Unlock()
+	file.MUnlock()
 
 	return len(buffer)
 }
@@ -120,8 +120,8 @@ func (fs *WinfspFS) Flush(path string, file_handle uint64) (errc int) {
 		return 0
 	}
 
-	fh.Lock()
-	defer fh.Unlock()
+	fh.MLock()
+	defer fh.MUnlock()
 	if fh.IsDirty() {
 		buf, off := fh.Buffer()
 		fs.logger.Logf("[Flush] about to write path=%s buffer_len=%d buffer_off=%d", fh.Path(), len(buf), off)
@@ -129,19 +129,19 @@ func (fs *WinfspFS) Flush(path string, file_handle uint64) (errc int) {
 			if os.IsNotExist(err) && fh.Flags().Create() {
 				end := off + int64(len(buf))
 				if end > int64(^uint(0)>>1) {
-					fh.Unlock()
+					fh.MUnlock()
 					fs.logger.Logf("[Flush] too large allocate for %s; returning EIO", fh.Path())
 					return -fuse.EIO
 				}
 				full := make([]byte, int(end))
 				copy(full[int(off):], buf)
 				if werr := fs.client.Write(fh.Path(), full); werr != nil {
-					fh.Unlock()
+					fh.MUnlock()
 					fs.logger.Logf("[Flush] client.Write error for %s: %v; returning EIO", fh.Path(), werr)
 					return -fuse.EIO
 				}
 			} else {
-				fh.Unlock()
+				fh.MUnlock()
 				fs.logger.Logf("[Flush] client.WriteOffset error for %s: %v; returning EIO", fh.Path(), err)
 				return -fuse.EIO
 			}

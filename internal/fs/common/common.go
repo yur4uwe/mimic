@@ -22,11 +22,11 @@ func NewFilehandle(path string, oflags flags.OpenFlag) *FileHandle {
 	}
 }
 
-func (fh *FileHandle) Lock() {
+func (fh *FileHandle) MLock() {
 	fh.mu.Lock()
 }
 
-func (fh *FileHandle) Unlock() {
+func (fh *FileHandle) MUnlock() {
 	fh.mu.Unlock()
 }
 
