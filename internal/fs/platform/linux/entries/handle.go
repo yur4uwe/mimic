@@ -37,9 +37,10 @@ func (h *Handle) Attr(ctx context.Context, a *fuse.Attr) error {
 	fi, err := h.wc.Stat(h.Path())
 	if err != nil {
 		if os.IsNotExist(err) {
+			h.logger.Errorf("(Handle) [Attr] stat: %s not found: %v; returning ENOENT", h.Path(), err)
 			return syscall.Errno(syscall.ENOENT)
 		}
-		h.logger.Logf("(Handle) [Attr] Stat error for %s: %v; returning EIO", h.Path(), err)
+		h.logger.Errorf("(Handle) [Attr] Stat error for %s: %v; returning EIO", h.Path(), err)
 		return syscall.Errno(syscall.EIO)
 	}
 
@@ -60,9 +61,10 @@ func (h *Handle) ReadAll(ctx context.Context) ([]byte, error) {
 	data, err := h.wc.Read(h.Path())
 	if err != nil {
 		if os.IsNotExist(err) {
+			h.logger.Logf("(Handle) [ReadAll] file not found for %s; returning ENOENT", h.Path())
 			return nil, syscall.Errno(syscall.ENOENT)
 		}
-		h.logger.Logf("(Handle) [ReadAll] Read error for %s: %v; returning EIO", h.Path(), err)
+		h.logger.Errorf("(Handle) [ReadAll] Read error for %s: %v; returning EIO", h.Path(), err)
 		return nil, syscall.Errno(syscall.EIO)
 	}
 	return data, nil
@@ -78,9 +80,10 @@ func (h *Handle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.Rea
 	data, err := h.wc.Read(h.Path())
 	if err != nil {
 		if os.IsNotExist(err) {
+			h.logger.Errorf("(Handle) [Read] file not found for %s: %v; returning ENOENT", h.Path(), err)
 			return syscall.Errno(syscall.ENOENT)
 		}
-		h.logger.Logf("(Handle) [Read] Read error for %s: %v; returning EIO", h.Path(), err)
+		h.logger.Errorf("(Handle) [Read] Read error for %s: %v; returning EIO", h.Path(), err)
 		return syscall.Errno(syscall.EIO)
 	}
 
@@ -120,7 +123,12 @@ func (h *Handle) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 
 	ents, err := h.wc.ReadDir(h.Path())
 	if err != nil {
-		return nil, syscall.Errno(syscall.ENOENT)
+		if os.IsNotExist(err) {
+			h.logger.Errorf("(Handle) [ReadDirAll] directory not found for %s: %v; returning ENOENT", h.Path(), err)
+			return nil, syscall.Errno(syscall.ENOENT)
+		}
+		h.logger.Errorf("(Handle) [ReadDirAll] ReadDir error for %s: %v; returning EIO", h.Path(), err)
+		return nil, syscall.Errno(syscall.EIO)
 	}
 
 	var dirents []fuse.Dirent
@@ -158,28 +166,23 @@ func (h *Handle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 	h.MLock()
 	buf, off := h.Buffer()
 	if buf != nil {
-		// Attempt to write the anchored buffer using WriteOffset. The
-		// underlying wrapper may try a partial PUT and fall back to a
-		// merged full-write if necessary. If the remote reports the file
-		// doesn't exist and this handle was opened with create, build a
-		// full-sized buffer (zeros up to offset) and write it.
 		if err := h.wc.WriteOffset(h.Path(), buf, off); err != nil {
 			if os.IsNotExist(err) && h.Flags().Create() {
 				end := off + int64(len(buf))
 				if end > int64(^uint(0)>>1) {
-					h.logger.Logf("(Handle) [Flush] too large allocate for %s; returning EIO", h.Path())
+					h.logger.Errorf("(Handle) [Flush] too large allocate for %s; returning EIO", h.Path())
 					h.MUnlock()
 					return syscall.Errno(syscall.EIO)
 				}
 				full := make([]byte, int(end))
 				copy(full[int(off):], buf)
 				if werr := h.wc.Write(h.Path(), full); werr != nil {
-					h.logger.Logf("(Handle) [Flush] client.Write error for %s: %v; returning EIO", h.Path(), werr)
+					h.logger.Errorf("(Handle) [Flush] client.Write error for %s: %v; returning EIO", h.Path(), werr)
 					h.MUnlock()
 					return syscall.Errno(syscall.EIO)
 				}
 			} else {
-				h.logger.Logf("(Handle) [Flush] client.WriteOffset error for %s: %v; returning EIO", h.Path(), err)
+				h.logger.Errorf("(Handle) [Flush] client.WriteOffset error for %s: %v; returning EIO", h.Path(), err)
 				h.MUnlock()
 				return syscall.Errno(syscall.EIO)
 			}
@@ -197,7 +200,7 @@ func (h *Handle) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
 	if h.IsDirty() {
 		h.logger.Logf("(Handle) [Release] flushing buffer for %s", h.Path())
 		if err := h.Flush(ctx, nil); err != nil {
-			h.logger.Logf("(Handle) [Release] flush error for %s: %v", h.Path(), err)
+			h.logger.Errorf("(Handle) [Release] flush error for %s: %v", h.Path(), err)
 			return err
 		}
 	}
@@ -207,12 +210,13 @@ func (h *Handle) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
 
 func getLockOwner(reqOwner fuse.LockOwner) []byte {
 	if reqOwner != 0 {
-		return []byte(fmt.Sprintf("%d", reqOwner))
+		return fmt.Appendf(nil, "%d", reqOwner)
 	}
-	return []byte(fmt.Sprintf("pid:%d", os.Getpid()))
+	return fmt.Appendf(nil, "pid:%d", os.Getpid())
 }
 
 func (h *Handle) Lock(ctx context.Context, req *fuse.LockRequest) error {
+	h.logger.Logf("(Handle) [Lock] called for %s", h.Path())
 	owner := getLockOwner(req.LockOwner)
 
 	start := req.Lock.Start
@@ -221,14 +225,17 @@ func (h *Handle) Lock(ctx context.Context, req *fuse.LockRequest) error {
 
 	if err := h.wc.Lock(h.Path(), owner, start, end, ltype); err != nil {
 		if err == locking.ErrWouldBlock {
+			h.logger.Errorf("(Handle) [Lock] would block for %s: %v; returning EAGAIN", h.Path(), err)
 			return syscall.Errno(syscall.EAGAIN)
 		}
+		h.logger.Errorf("(Handle) [Lock] lock error for %s: %v; returning EIO", h.Path(), err)
 		return syscall.Errno(syscall.EIO)
 	}
 	return nil
 }
 
 func (h *Handle) LockWait(ctx context.Context, req *fuse.LockWaitRequest) error {
+	h.logger.Logf("(Handle) [LockWait] called for %s", h.Path())
 	owner := getLockOwner(req.LockOwner)
 
 	start := req.Lock.Start
@@ -240,12 +247,14 @@ func (h *Handle) LockWait(ctx context.Context, req *fuse.LockWaitRequest) error 
 	}
 
 	if err := h.wc.LockWait(ctx, h.Path(), owner, start, end, ltype); err != nil {
+		h.logger.Errorf("(Handle) [LockWait] lock wait error for %s: %v; returning EIO", h.Path(), err)
 		return syscall.Errno(syscall.EIO)
 	}
 	return nil
 }
 
 func (h *Handle) Unlock(ctx context.Context, req *fuse.UnlockRequest) error {
+	h.logger.Logf("(Handle) [Unlock] called for %s", h.Path())
 	owner := getLockOwner(req.LockOwner)
 
 	start := req.Lock.Start
@@ -253,8 +262,10 @@ func (h *Handle) Unlock(ctx context.Context, req *fuse.UnlockRequest) error {
 
 	if err := h.wc.Unlock(h.Path(), owner, start, end); err != nil {
 		if err == locking.ErrNotOwner {
+			h.logger.Errorf("(Handle) [Unlock] not owner for %s: %v; returning EACCES", h.Path(), err)
 			return syscall.Errno(syscall.EACCES)
 		}
+		h.logger.Errorf("(Handle) [Unlock] unlock error for %s: %v; returning EIO", h.Path(), err)
 		return syscall.Errno(syscall.EIO)
 	}
 	return nil
@@ -269,11 +280,14 @@ func (h *Handle) Unlock(ctx context.Context, req *fuse.UnlockRequest) error {
 // have Lock.Type F_UNLCK, and the whole struct should be
 // overwritten for in case of conflicting locks.
 func (h *Handle) QueryLock(ctx context.Context, req *fuse.QueryLockRequest, resp *fuse.QueryLockResponse) error {
+	h.logger.Logf("(Handle) [QueryLock] called for %s", h.Path())
+
 	start := req.Lock.Start
 	end := req.Lock.End
 
 	lock := h.wc.Query(h.Path(), start, end)
 	if lock == nil {
+
 		return nil
 	}
 

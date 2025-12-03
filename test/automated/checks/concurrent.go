@@ -32,20 +32,9 @@ func CheckConcurrentAppendRead(base string) (retErr error) {
 	go func() {
 		defer wg.Done()
 		for i := range n {
-			f, err := os.OpenFile(fpath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+			err := os.WriteFile(fpath, fmt.Appendf(nil, "x%02d\n", i), os.FileMode(os.O_WRONLY|os.O_APPEND))
 			if err != nil {
-				appendCh <- err
-				return
-			}
-			// write a line
-			line := fmt.Sprintf("x%02d\n", i)
-			if _, err := f.Write([]byte(line)); err != nil {
-				_ = f.Close()
-				appendCh <- err
-				return
-			}
-			if err := f.Close(); err != nil {
-				appendCh <- err
+				appendCh <- fmt.Errorf("write error: %v", err)
 				return
 			}
 			time.Sleep(50 * time.Millisecond)

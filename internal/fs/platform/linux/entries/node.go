@@ -49,12 +49,15 @@ func (n *Node) Attr(ctx context.Context, a *fuse.Attr) error {
 	fi, err := n.wc.Stat(n.path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			n.logger.Logf("[Attr] stat: %s not found: %v; returning ENOENT", n.path, err)
 			return syscall.Errno(syscall.ENOENT)
 		}
+		n.logger.Logf("[Attr] stat error for %s: %v; returning error", n.path, err)
 		return err
 	}
 
 	if checks.IsNilInterface(fi) {
+		n.logger.Logf("[Attr] nil fileinfo for %s; returning ENOENT", n.path)
 		return syscall.Errno(syscall.ENOENT)
 	}
 
@@ -77,10 +80,12 @@ func (n *Node) Lookup(ctx context.Context, name string) (fs.Node, error) {
 
 	fi, err := n.wc.Stat(childPath)
 	if err != nil {
+		n.logger.Errorf("[Lookup] stat error for %s: %v; returning ENOENT", childPath, err)
 		return nil, syscall.Errno(syscall.ENOENT)
 	}
 
 	if checks.IsNilInterface(fi) {
+		n.logger.Errorf("[Lookup] nil fileinfo for %s; returning ENOENT", childPath)
 		return nil, syscall.Errno(syscall.ENOENT)
 	}
 
@@ -96,6 +101,7 @@ func (n *Node) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 
 	infos, err := n.wc.ReadDir(n.path)
 	if err != nil {
+		n.logger.Errorf("[ReadDirAll] ReadDir error for %s: %v; returning error", n.path, err)
 		return nil, err
 	}
 
@@ -133,6 +139,7 @@ func (n *Node) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, erro
 	newDirPath := path.Join(n.path, req.Name)
 	n.logger.Logf("[Mkdir] called for path: %s", newDirPath)
 	if err := n.wc.Mkdir(newDirPath, req.Mode); err != nil {
+		n.logger.Errorf("[Mkdir] mkdir error for %s: %v; returning error", newDirPath, err)
 		return nil, err
 	}
 
@@ -145,6 +152,7 @@ func (n *Node) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.C
 	n.logger.Logf("[Create] called for path: %s, with flags: %v", newFilePath, oflags)
 
 	if err := n.wc.Create(newFilePath); err != nil {
+		n.logger.Errorf("[Create] create error for %s: %v; returning error", newFilePath, err)
 		return nil, nil, err
 	}
 
@@ -159,10 +167,12 @@ func (n *Node) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 
 	if req.Dir {
 		if err := n.wc.Rmdir(targetPath); err != nil {
+			n.logger.Errorf("[Remove] rmdir error for %s: %v; returning error", targetPath, err)
 			return err
 		}
 	} else {
 		if err := n.wc.Remove(targetPath); err != nil {
+			n.logger.Errorf("[Remove] remove error for %s: %v; returning error", targetPath, err)
 			return err
 		}
 	}
@@ -174,12 +184,14 @@ func (n *Node) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.No
 	oldPath := path.Join(n.path, req.OldName)
 	newNode, ok := newDir.(*Node)
 	if !ok {
+		n.logger.Errorf("[Rename] invalid target directory for rename from %s to %s", oldPath, req.NewName)
 		return errors.New("invalid target directory")
 	}
 
 	newPath := path.Join(newNode.path, req.NewName)
-	n.logger.Logf("Rename called from path: %s to path: %s", oldPath, newPath)
+	n.logger.Logf("[Rename] called from path: %s to path: %s", oldPath, newPath)
 	if err := n.wc.Rename(oldPath, newPath); err != nil {
+		n.logger.Errorf("[Rename] rename error from %s to %s: %v; returning error", oldPath, newPath, err)
 		return err
 	}
 
@@ -192,6 +204,7 @@ func (n *Node) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse
 	}
 
 	if err := n.wc.Truncate(n.path, int64(req.Size)); err != nil {
+		n.logger.Errorf("[Setattr] truncate error for %s: %v; returning error", n.path, err)
 		return err
 	}
 
@@ -209,6 +222,7 @@ func (n *Node) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 
 	if _, err := n.wc.Stat(n.path); flags.Create() && os.IsNotExist(err) {
 		if err := n.wc.Create(n.path); err != nil {
+			n.logger.Errorf("[Open] create error for %s: %v; returning error", n.path, err)
 			return nil, err
 		}
 	}

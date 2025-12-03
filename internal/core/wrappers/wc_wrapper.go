@@ -263,10 +263,10 @@ func (w *WebdavClient) Unlock(name string, owner []byte, start, end uint64) erro
 	return w.lm.Release(name, owner, start, end)
 }
 
-func (w *WebdavClient) Query(name string, start, end uint64) (owner []byte, pid int, lockType locking.LockType, ok bool) {
+func (w *WebdavClient) Query(name string, start, end uint64) *locking.LockInfo {
 	info, found := w.lm.Query(name, start, end)
 	if !found {
-		return nil, 0, locking.F_UNLCK, false
+		return nil
 	}
-	return info.Owner, info.PID, info.Type, true
+	return &info
 }
