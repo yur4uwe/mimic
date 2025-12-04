@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/mimic/internal/fs/common"
 	flag "github.com/spf13/pflag"
 )
 
@@ -93,7 +94,7 @@ func ParseConfig(path string) (*Config, error) {
 		}
 
 		// If the per-user config doesn't exist, try creating a default one.
-		if _, statErr := os.Stat(defCfgPath); os.IsNotExist(statErr) {
+		if _, statErr := os.Stat(defCfgPath); common.IsNotExistErr(statErr) {
 			fmt.Println("Missing per user config, trying to create a new one at", defCfgPath)
 			if werr := writeDefaultConfig(defCfgPath, defaultConfig); werr != nil {
 				return nil, werr

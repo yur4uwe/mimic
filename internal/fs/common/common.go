@@ -1,6 +1,7 @@
 package common
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/mimic/internal/core/flags"
@@ -78,4 +79,11 @@ func (fh *FileHandle) Flags() flags.OpenFlag {
 
 func (fh *FileHandle) Path() string {
 	return fh.path
+}
+
+func IsNotExistErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found")
 }

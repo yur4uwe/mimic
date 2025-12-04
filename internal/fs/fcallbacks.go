@@ -1,11 +1,11 @@
 package fs
 
 import (
-	"fmt"
 	"os"
 	"strings"
 
 	"github.com/mimic/internal/core/casters"
+	"github.com/mimic/internal/fs/common"
 	"github.com/winfsp/cgofuse/fuse"
 )
 
@@ -17,12 +17,8 @@ func (fs *WinfspFS) Truncate(p string, size int64, fh uint64) int {
 	}
 
 	file, ok := fs.GetHandle(fh)
-	if !ok {
-		return -fuse.EIO
-	}
-
-	if !file.Flags().WriteAllowed() {
-		fmt.Println("Truncate forbidden")
+	if ok && file != nil && !file.Flags().WriteAllowed() {
+		fs.logger.Errorf("[Truncate] access denied for %s, flag state: %+v", p, file.Flags())
 		return -fuse.EACCES
 	}
 
@@ -34,6 +30,7 @@ func (fs *WinfspFS) Truncate(p string, size int64, fh uint64) int {
 
 	err = fs.client.Truncate(norm, size)
 	if err != nil {
+		fs.logger.Errorf("[Truncate] truncate error for path=%s size=%d: %v", p, size, err)
 		return -fuse.EIO
 	}
 
@@ -51,6 +48,7 @@ func (fs *WinfspFS) Unlink(p string) int {
 		return -fuse.EIO
 	}
 	if err := fs.client.Remove(norm); err != nil {
+		fs.logger.Errorf("[Unlink] remove error for path=%s: %v", p, err)
 		return -fuse.EIO
 	}
 
@@ -62,11 +60,12 @@ func (fs *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle 
 
 	file, ok := fs.GetHandle(file_handle)
 	if !ok {
+		fs.logger.Errorf("[Write] invalid file handle=%d for path=%s", file_handle, path)
 		return -fuse.EIO
 	}
 
 	if !file.Flags().WriteAllowed() {
-		fmt.Println("Write forbidden")
+		fs.logger.Errorf("[Write] access denied for %s, flag state: %+v", path, file.Flags())
 		return -fuse.EACCES
 	}
 
@@ -86,10 +85,11 @@ func (fs *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
 	}
 
 	if err := fs.client.Create(path); err != nil {
-		fs.logger.Errorf("[Create]: remote write failed path=%s err=%v", path, err)
 		if os.IsPermission(err) {
+			fs.logger.Errorf("[Create]: permission denied for path=%s", path)
 			return -fuse.EACCES, 0
 		}
+		fs.logger.Errorf("[Create]: remote write failed path=%s err=%v", path, err)
 		return -fuse.EIO, 0
 	}
 
@@ -113,10 +113,12 @@ func (fs *WinfspFS) Flush(path string, file_handle uint64) (errc int) {
 	fs.logger.Logf("[Flush]: path=%s fh=%d", path, file_handle)
 	fh, ok := fs.GetHandle(file_handle)
 	if !ok {
+		fs.logger.Errorf("[Flush] invalid file handle=%d for path=%s", file_handle, path)
 		return 0
 	}
 
 	if !fh.Flags().WriteAllowed() {
+		fs.logger.Errorf("[Flush] access denied for %s, flag state: %+v", path, fh.Flags())
 		return 0
 	}
 
@@ -126,7 +128,7 @@ func (fs *WinfspFS) Flush(path string, file_handle uint64) (errc int) {
 		buf, off := fh.Buffer()
 		fs.logger.Logf("[Flush] about to write path=%s buffer_len=%d buffer_off=%d", fh.Path(), len(buf), off)
 		if err := fs.client.WriteOffset(fh.Path(), buf, off); err != nil {
-			if os.IsNotExist(err) && fh.Flags().Create() {
+			if common.IsNotExistErr(err) && fh.Flags().Create() {
 				end := off + int64(len(buf))
 				if end > int64(^uint(0)>>1) {
 					fs.logger.Logf("[Flush] too large allocate for %s; returning EIO", fh.Path())

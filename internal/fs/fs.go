@@ -2,7 +2,6 @@ package fs
 
 import (
 	"fmt"
-	"os/exec"
 	"sync"
 
 	"github.com/mimic/internal/core/logger"
@@ -47,9 +46,8 @@ func (fs *WinfspFS) Mount(mountpoint string, flags []string) error {
 func (fs *WinfspFS) Unmount() error {
 	fs.logger.Log("Unmounting WinFSP filesystem")
 	if ok := fs.host.Unmount(); !ok {
-		if ex := exec.Command("fusermount3", "-uz", fs.mpoint).Run(); ex != nil {
-			fs.logger.Errorf("fusermount3 -uz failed: %v", ex)
-		}
+		fs.logger.Error("Failed to unmount WinFSP filesystem")
+		return fmt.Errorf("failed to unmount winfsp filesystem")
 	}
 
 	return nil

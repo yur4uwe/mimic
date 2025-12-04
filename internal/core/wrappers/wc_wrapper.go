@@ -10,6 +10,7 @@ import (
 
 	"github.com/mimic/internal/core/cache"
 	"github.com/mimic/internal/core/locking"
+	"github.com/mimic/internal/fs/common"
 	"github.com/studio-b12/gowebdav"
 )
 
@@ -98,7 +99,7 @@ func (w *WebdavClient) Write(name string, data []byte) error {
 func (w *WebdavClient) WriteOffset(name string, data []byte, offset int64) error {
 	existing, err := w.fetch(name)
 	if err != nil {
-		if os.IsNotExist(err) && offset == 0 {
+		if common.IsNotExistErr(err) && offset == 0 {
 			return w.commit(name, data)
 		}
 		return err
@@ -207,7 +208,7 @@ func (w *WebdavClient) Truncate(name string, size int64) error {
 	fi, err := w.client.Stat(name)
 	if err != nil {
 		// create empty file if it doesn't exist and size == 0
-		if os.IsNotExist(err) && size == 0 {
+		if common.IsNotExistErr(err) && size == 0 {
 			return w.Create(name)
 		}
 		return err
@@ -223,7 +224,7 @@ func (w *WebdavClient) Truncate(name string, size int64) error {
 	existing, err := w.fetch(name)
 	if err != nil {
 		// if not exists and size > 0 create zero-filled
-		if os.IsNotExist(err) {
+		if common.IsNotExistErr(err) {
 			buf := make([]byte, size)
 			return w.commit(name, buf)
 		}

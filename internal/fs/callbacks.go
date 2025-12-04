@@ -73,6 +73,16 @@ func (fs *WinfspFS) Getattr(p string, stat *fuse.Stat_t, fh uint64) int {
 
 	file, err := fs.client.Stat(norm)
 	if err != nil {
+		if common.IsNotExistErr(err) {
+			fs.logger.Errorf("[Getattr] stat: %s not found: %v; returning ENOENT", norm, err)
+			return -fuse.ENOENT
+		}
+		fs.logger.Errorf("[Getattr] stat error for %s: %v; returning EIO", norm, err)
+		return -fuse.EIO
+	}
+
+	if checks.IsNilInterface(file) {
+		fs.logger.Errorf("[Getattr] nil fileinfo for %s; returning ENOENT", norm)
 		return -fuse.ENOENT
 	}
 
@@ -92,13 +102,15 @@ func (fs *WinfspFS) Open(path string, oflags int) (int, uint64) {
 		err = os.ErrNotExist
 	}
 
-	if flags.Create() && os.IsNotExist(err) {
+	if flags.Create() && common.IsNotExistErr(err) {
 		if err := fs.client.Create(path); err != nil {
+			fs.logger.Errorf("[Open] remote create failed path=%s err=%v", path, err)
 			return -fuse.EIO, 0
 		}
 	}
 
-	if flags.Exclusive() && !os.IsNotExist(err) {
+	if flags.Exclusive() && !common.IsNotExistErr(err) {
+		fs.logger.Errorf("[Open] file exists and exclusive flag set path=%s", path)
 		return -fuse.EEXIST, 0
 	}
 
@@ -114,9 +126,12 @@ func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle u
 
 	file, ok := fs.GetHandle(file_handle)
 	if !ok {
+		fs.logger.Errorf("[Read] invalid file handle=%d for path=%s", file_handle, path)
 		return -fuse.EIO
 	}
+
 	if !file.Flags().ReadAllowed() {
+		fs.logger.Errorf("[Read] access denied for %s, flag state: %+v", path, file.Flags())
 		return -fuse.EACCES
 	}
 
@@ -127,6 +142,7 @@ func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle u
 	toRead := len(buffer)
 	rc, err := fs.client.ReadRange(file.Path(), offset, int64(toRead))
 	if err != nil {
+		fs.logger.Errorf("[Read] ReadRange error for %s offset=%d len=%d: %v", path, offset, toRead, err)
 		return -fuse.EIO
 	}
 	defer rc.Close()
@@ -135,6 +151,7 @@ func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle u
 	if err == io.ErrUnexpectedEOF || err == io.EOF {
 		return n
 	} else if err != nil {
+		fs.logger.Errorf("[Read] ReadFull error for %s offset=%d len=%d: %v", path, offset, toRead, err)
 		return -fuse.EIO
 	}
 
@@ -146,6 +163,7 @@ func (fs *WinfspFS) Rename(oldPath string, newPath string) int {
 
 	err := fs.client.Rename(oldPath, newPath)
 	if err != nil {
+		fs.logger.Errorf("[Rename] rename error from %s to %s: %v", oldPath, newPath, err)
 		return -fuse.EIO
 	}
 

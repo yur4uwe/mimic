@@ -5,6 +5,7 @@ import (
 	"path"
 
 	"github.com/mimic/internal/core/casters"
+	"github.com/mimic/internal/fs/common"
 	"github.com/winfsp/cgofuse/fuse"
 )
 
@@ -13,9 +14,11 @@ func (fs *WinfspFS) Opendir(path string) (int, uint64) {
 
 	f, err := fs.client.Stat(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if common.IsNotExistErr(err) {
+			fs.logger.Errorf("[Opendir] stat: %s not found: %v; returning ENOENT", path, err)
 			return -fuse.ENOENT, 0
 		}
+		fs.logger.Errorf("[Opendir] stat error for %s: %v; returning EIO", path, err)
 		return -fuse.EIO, 0
 	}
 
@@ -67,6 +70,7 @@ func (fs *WinfspFS) Mkdir(p string, mode uint32) int {
 
 	err = fs.client.Mkdir(s, os.FileMode(mode))
 	if err != nil {
+		fs.logger.Errorf("[Mkdir] mkdir error for path=%s error=%v", s, err)
 		return -fuse.EIO
 	}
 
@@ -78,6 +82,7 @@ func (fs *WinfspFS) Rmdir(path string) int {
 
 	err := fs.client.Rmdir(path)
 	if err != nil {
+		fs.logger.Errorf("[Rmdir] rmdir error for path=%s error=%v", path, err)
 		return -fuse.EIO
 	}
 
