@@ -1,4 +1,4 @@
-package win
+package fs
 
 import (
 	"os"

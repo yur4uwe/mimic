@@ -1,9 +1,8 @@
-package win
+package fs
 
 import (
 	"io"
 	"os"
-	"strings"
 	"sync/atomic"
 
 	"github.com/mimic/internal/core/casters"
@@ -155,10 +154,6 @@ func (fs *WinfspFS) Rename(oldPath string, newPath string) int {
 
 func (fs *WinfspFS) Utimens(path string, times []fuse.Timespec) int {
 	fs.logger.Logf("[Utimens] path=%s times=%#v", path, times)
-	if strings.HasSuffix(path, "/") && path != "/" {
-		path = strings.TrimSuffix(path, "/")
-	}
-
 	// no direct support for setting times in WebDAV; ignore for now
 	return 0
 }

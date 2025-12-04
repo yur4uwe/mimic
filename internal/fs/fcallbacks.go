@@ -1,4 +1,4 @@
-package win
+package fs
 
 import (
 	"fmt"
@@ -129,19 +129,16 @@ func (fs *WinfspFS) Flush(path string, file_handle uint64) (errc int) {
 			if os.IsNotExist(err) && fh.Flags().Create() {
 				end := off + int64(len(buf))
 				if end > int64(^uint(0)>>1) {
-					fh.MUnlock()
 					fs.logger.Logf("[Flush] too large allocate for %s; returning EIO", fh.Path())
 					return -fuse.EIO
 				}
 				full := make([]byte, int(end))
 				copy(full[int(off):], buf)
 				if werr := fs.client.Write(fh.Path(), full); werr != nil {
-					fh.MUnlock()
 					fs.logger.Logf("[Flush] client.Write error for %s: %v; returning EIO", fh.Path(), werr)
 					return -fuse.EIO
 				}
 			} else {
-				fh.MUnlock()
 				fs.logger.Logf("[Flush] client.WriteOffset error for %s: %v; returning EIO", fh.Path(), err)
 				return -fuse.EIO
 			}
