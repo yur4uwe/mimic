@@ -175,21 +175,7 @@ func (w *WebdavClient) Rename(oldname, newname string) error {
 	defer w.cache.InvalidateTree(oldname)
 	defer w.cache.InvalidateTree(newname)
 
-	// Try a custom MOVE request with a path-only Destination to avoid host/scheme mismatches
-	if w.baseURL != "" {
-		url := buildURL(w.baseURL, oldname)
-		headers := map[string]string{
-			"Destination": newname,
-			"Overwrite":   "T",
-		}
-
-		code, _, err := davRequest("MOVE", url, w.username, w.password, nil, headers)
-		if err == nil && code >= 200 && code < 300 {
-			return nil
-		}
-		// Fall through to gowebdav rename on network error or non-2xx responses
-	}
-
+	w.client.SetHeader("Host", w.baseURL)
 	return w.client.Rename(oldname, newname, true)
 }
 

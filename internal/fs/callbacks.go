@@ -10,6 +10,7 @@ import (
 	"github.com/mimic/internal/core/flags"
 	"github.com/mimic/internal/fs/common"
 	"github.com/winfsp/cgofuse/fuse"
+	fuselib "github.com/winfsp/cgofuse/fuse"
 )
 
 const (
@@ -20,10 +21,10 @@ const (
 type openedFile struct {
 	common.FileHandle
 	size int64
-	stat *fuse.Stat_t
+	stat *fuselib.Stat_t
 }
 
-func (fs *WinfspFS) NewHandle(path string, stat *fuse.Stat_t, oflags uint32) uint64 {
+func (fs *WinfspFS) NewHandle(path string, stat *fuselib.Stat_t, oflags uint32) uint64 {
 	file_handle := atomic.AddUint64(&fs.nextHandle, 1)
 	fs.handles.Store(file_handle, &openedFile{
 		FileHandle: *common.NewFilehandle(path, flags.OpenFlag(oflags)),
@@ -42,25 +43,25 @@ func (fs *WinfspFS) GetHandle(handle uint64) (*openedFile, bool) {
 	return of, true
 }
 
-func (fs *WinfspFS) Getattr(p string, stat *fuse.Stat_t, fh uint64) int {
+func (fs *WinfspFS) Getattr(p string, stat *fuselib.Stat_t, fh uint64) int {
 	if p == "/" {
-		stat.Mode = fuse.S_IFDIR | 0o777
+		stat.Mode = fuselib.S_IFDIR | 0o777
 		stat.Nlink = 2
 		stat.Size = 0
 		stat.Uid = 1000
 		stat.Gid = 1000
-		stat.Mtim = fuse.Now()
-		stat.Atim = fuse.Now()
-		stat.Ctim = fuse.Now()
+		stat.Mtim = fuselib.Now()
+		stat.Atim = fuselib.Now()
+		stat.Ctim = fuselib.Now()
 		stat.Blksize = 4096
-		stat.Birthtim = fuse.Now()
+		stat.Birthtim = fuselib.Now()
 		return 0
 	}
 
 	norm, err := casters.NormalizePath(p)
 	if err != nil {
 		fs.logger.Errorf("[Getattr] Path normalize error for path=%s error=%v", p, err)
-		return -fuse.ENOENT
+		return -common.ENOENT
 	}
 
 	if fi, ok := fs.GetHandle(fh); ^uint64(0) != fh && ok {
@@ -75,15 +76,15 @@ func (fs *WinfspFS) Getattr(p string, stat *fuse.Stat_t, fh uint64) int {
 	if err != nil {
 		if common.IsNotExistErr(err) {
 			fs.logger.Errorf("[Getattr] stat: %s not found: %v; returning ENOENT", norm, err)
-			return -fuse.ENOENT
+			return -common.ENOENT
 		}
 		fs.logger.Errorf("[Getattr] stat error for %s: %v; returning EIO", norm, err)
-		return -fuse.EIO
+		return -common.EIO
 	}
 
 	if checks.IsNilInterface(file) {
 		fs.logger.Errorf("[Getattr] nil fileinfo for %s; returning ENOENT", norm)
-		return -fuse.ENOENT
+		return -common.ENOENT
 	}
 
 	*stat = *casters.FileInfoCast(file)
@@ -105,13 +106,13 @@ func (fs *WinfspFS) Open(path string, oflags int) (int, uint64) {
 	if flags.Create() && common.IsNotExistErr(err) {
 		if err := fs.client.Create(path); err != nil {
 			fs.logger.Errorf("[Open] remote create failed path=%s err=%v", path, err)
-			return -fuse.EIO, 0
+			return -common.EIO, 0
 		}
 	}
 
 	if flags.Exclusive() && !common.IsNotExistErr(err) {
 		fs.logger.Errorf("[Open] file exists and exclusive flag set path=%s", path)
-		return -fuse.EEXIST, 0
+		return -common.EEXIST, 0
 	}
 
 	handle := fs.NewHandle(path, casters.FileInfoCast(fi), uint32(flags))
@@ -127,12 +128,12 @@ func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle u
 	file, ok := fs.GetHandle(file_handle)
 	if !ok {
 		fs.logger.Errorf("[Read] invalid file handle=%d for path=%s", file_handle, path)
-		return -fuse.EIO
+		return -common.EIO
 	}
 
 	if !file.Flags().ReadAllowed() {
 		fs.logger.Errorf("[Read] access denied for %s, flag state: %+v", path, file.Flags())
-		return -fuse.EACCES
+		return -common.EACCES
 	}
 
 	if offset >= file.size {
@@ -143,7 +144,7 @@ func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle u
 	rc, err := fs.client.ReadRange(file.Path(), offset, int64(toRead))
 	if err != nil {
 		fs.logger.Errorf("[Read] ReadRange error for %s offset=%d len=%d: %v", path, offset, toRead, err)
-		return -fuse.EIO
+		return -common.EIO
 	}
 	defer rc.Close()
 
@@ -152,7 +153,7 @@ func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle u
 		return n
 	} else if err != nil {
 		fs.logger.Errorf("[Read] ReadFull error for %s offset=%d len=%d: %v", path, offset, toRead, err)
-		return -fuse.EIO
+		return -common.EIO
 	}
 
 	return n
@@ -164,7 +165,7 @@ func (fs *WinfspFS) Rename(oldPath string, newPath string) int {
 	err := fs.client.Rename(oldPath, newPath)
 	if err != nil {
 		fs.logger.Errorf("[Rename] rename error from %s to %s: %v", oldPath, newPath, err)
-		return -fuse.EIO
+		return -common.EIO
 	}
 
 	return 0
@@ -179,7 +180,6 @@ func (fs *WinfspFS) Utimens(path string, times []fuse.Timespec) int {
 func (fs *WinfspFS) Statfs(path string, stat *fuse.Statfs_t) int {
 	fs.logger.Logf("[Statfs] path=%s", path)
 
-	// provide some reasonable defaults
 	stat.Bsize = DEFAULT_BLOCK_SIZE
 	stat.Frsize = DEFAULT_BLOCK_SIZE
 	stat.Blocks = 1024 * 1024 // 1M blocks

@@ -6,7 +6,6 @@ import (
 
 	"github.com/mimic/internal/core/casters"
 	"github.com/mimic/internal/fs/common"
-	"github.com/winfsp/cgofuse/fuse"
 )
 
 func (fs *WinfspFS) Truncate(p string, size int64, fh uint64) int {
@@ -19,19 +18,19 @@ func (fs *WinfspFS) Truncate(p string, size int64, fh uint64) int {
 	file, ok := fs.GetHandle(fh)
 	if ok && file != nil && !file.Flags().WriteAllowed() {
 		fs.logger.Errorf("[Truncate] access denied for %s, flag state: %+v", p, file.Flags())
-		return -fuse.EACCES
+		return -common.EACCES
 	}
 
 	norm, err := casters.NormalizePath(p)
 	if err != nil {
 		fs.logger.Errorf("[Truncate] Path normalize error for path=%s error=%v", p, err)
-		return -fuse.EIO
+		return -common.EIO
 	}
 
 	err = fs.client.Truncate(norm, size)
 	if err != nil {
 		fs.logger.Errorf("[Truncate] truncate error for path=%s size=%d: %v", p, size, err)
-		return -fuse.EIO
+		return -common.EIO
 	}
 
 	return 0
@@ -45,11 +44,11 @@ func (fs *WinfspFS) Unlink(p string) int {
 	norm, err := casters.NormalizePath(p)
 	if err != nil {
 		fs.logger.Errorf("[Unlink] Path normalize error for path=%s error=%v", p, err)
-		return -fuse.EIO
+		return -common.EIO
 	}
 	if err := fs.client.Remove(norm); err != nil {
 		fs.logger.Errorf("[Unlink] remove error for path=%s: %v", p, err)
-		return -fuse.EIO
+		return -common.EIO
 	}
 
 	return 0
@@ -61,12 +60,12 @@ func (fs *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle 
 	file, ok := fs.GetHandle(file_handle)
 	if !ok {
 		fs.logger.Errorf("[Write] invalid file handle=%d for path=%s", file_handle, path)
-		return -fuse.EIO
+		return -common.EIO
 	}
 
 	if !file.Flags().WriteAllowed() {
 		fs.logger.Errorf("[Write] access denied for %s, flag state: %+v", path, file.Flags())
-		return -fuse.EACCES
+		return -common.EACCES
 	}
 
 	file.MLock()
@@ -87,10 +86,10 @@ func (fs *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
 	if err := fs.client.Create(path); err != nil {
 		if os.IsPermission(err) {
 			fs.logger.Errorf("[Create]: permission denied for path=%s", path)
-			return -fuse.EACCES, 0
+			return -common.EACCES, 0
 		}
 		fs.logger.Errorf("[Create]: remote write failed path=%s err=%v", path, err)
-		return -fuse.EIO, 0
+		return -common.EIO, 0
 	}
 
 	h := uint64(0)
@@ -132,17 +131,17 @@ func (fs *WinfspFS) Flush(path string, file_handle uint64) (errc int) {
 				end := off + int64(len(buf))
 				if end > int64(^uint(0)>>1) {
 					fs.logger.Logf("[Flush] too large allocate for %s; returning EIO", fh.Path())
-					return -fuse.EIO
+					return -common.EIO
 				}
 				full := make([]byte, int(end))
 				copy(full[int(off):], buf)
 				if werr := fs.client.Write(fh.Path(), full); werr != nil {
 					fs.logger.Logf("[Flush] client.Write error for %s: %v; returning EIO", fh.Path(), werr)
-					return -fuse.EIO
+					return -common.EIO
 				}
 			} else {
 				fs.logger.Logf("[Flush] client.WriteOffset error for %s: %v; returning EIO", fh.Path(), err)
-				return -fuse.EIO
+				return -common.EIO
 			}
 		}
 		fh.ClearBuffer()

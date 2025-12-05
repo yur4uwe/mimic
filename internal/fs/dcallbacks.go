@@ -16,10 +16,10 @@ func (fs *WinfspFS) Opendir(path string) (int, uint64) {
 	if err != nil {
 		if common.IsNotExistErr(err) {
 			fs.logger.Errorf("[Opendir] stat: %s not found: %v; returning ENOENT", path, err)
-			return -fuse.ENOENT, 0
+			return -common.ENOENT, 0
 		}
 		fs.logger.Errorf("[Opendir] stat error for %s: %v; returning EIO", path, err)
-		return -fuse.EIO, 0
+		return -common.EIO, 0
 	}
 
 	handle := fs.NewHandle(path, casters.FileInfoCast(f), 0)
@@ -40,7 +40,7 @@ func (fs *WinfspFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int
 
 	items, err := fs.client.ReadDir(filepath)
 	if err != nil {
-		return -fuse.ENOENT
+		return -common.ENOENT
 	}
 
 	for i, file := range items {
@@ -65,13 +65,13 @@ func (fs *WinfspFS) Mkdir(p string, mode uint32) int {
 	s, err := casters.NormalizePath(p)
 	if err != nil {
 		fs.logger.Errorf("[Mkdir] Path unescape error for path=%s error=%v", p, err)
-		return -fuse.EIO
+		return -common.EIO
 	}
 
 	err = fs.client.Mkdir(s, os.FileMode(mode))
 	if err != nil {
 		fs.logger.Errorf("[Mkdir] mkdir error for path=%s error=%v", s, err)
-		return -fuse.EIO
+		return -common.EIO
 	}
 
 	return 0
@@ -83,7 +83,7 @@ func (fs *WinfspFS) Rmdir(path string) int {
 	err := fs.client.Rmdir(path)
 	if err != nil {
 		fs.logger.Errorf("[Rmdir] rmdir error for path=%s error=%v", path, err)
-		return -fuse.EIO
+		return -common.EIO
 	}
 
 	return 0
