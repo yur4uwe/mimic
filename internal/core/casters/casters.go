@@ -34,7 +34,6 @@ func FileInfoCast(f os.FileInfo) *fuse.Stat_t {
 		stat.Size = f.Size()
 	}
 
-	// give a non-zero inode value (simple stable-ish value)
 	uid, gid, _ := fuse.Getcontext()
 
 	stat.Uid = uid
@@ -45,7 +44,9 @@ func FileInfoCast(f os.FileInfo) *fuse.Stat_t {
 	stat.Blksize = 4096
 	stat.Birthtim = fuse.NewTimespec(f.ModTime())
 
-	stat.Flags = fuse.UF_ARCHIVE
+	if strings.HasPrefix(f.Name(), ".") {
+		stat.Flags = fuse.UF_HIDDEN
+	}
 
 	return stat
 }

@@ -1,36 +1,37 @@
 package flags
 
 import (
-	"os"
 	"strings"
+
+	"github.com/winfsp/cgofuse/fuse"
 )
 
 type OpenFlag uint32
 
 func (f OpenFlag) WriteAllowed() bool {
 	// write allowed if O_WRONLY or O_RDWR is set
-	return (uint32(f)&uint32(os.O_WRONLY) != 0) || (uint32(f)&uint32(os.O_RDWR) != 0)
+	return (uint32(f)&uint32(fuse.O_WRONLY) != 0) || (uint32(f)&uint32(fuse.O_RDWR) != 0)
 }
 
 func (f OpenFlag) ReadAllowed() bool {
 	// read allowed unless open is explicitly write-only
-	return uint32(f)&uint32(os.O_WRONLY) == 0
+	return uint32(f)&uint32(fuse.O_WRONLY) == 0
 }
 
 func (f OpenFlag) Append() bool {
-	return uint32(f)&uint32(os.O_APPEND) != 0
+	return uint32(f)&uint32(fuse.O_APPEND) != 0
 }
 
 func (f OpenFlag) Create() bool {
-	return uint32(f)&uint32(os.O_CREATE) != 0
+	return uint32(f)&uint32(fuse.O_CREAT) != 0
 }
 
 func (f OpenFlag) Truncate() bool {
-	return uint32(f)&uint32(os.O_TRUNC) != 0
+	return uint32(f)&uint32(fuse.O_TRUNC) != 0
 }
 
 func (f OpenFlag) Exclusive() bool {
-	return uint32(f)&uint32(os.O_EXCL) != 0
+	return uint32(f)&uint32(fuse.O_EXCL) != 0
 }
 
 func (f OpenFlag) String() string {

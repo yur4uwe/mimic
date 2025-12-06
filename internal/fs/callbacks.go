@@ -192,3 +192,66 @@ func (fs *WinfspFS) Statfs(path string, stat *fuse.Statfs_t) int {
 
 	return 0
 }
+
+func (fs *WinfspFS) Chmod(path string, mode uint32) int {
+	fs.logger.Logf("[Chmod] path=%s mode=%#o", path, mode)
+	return -common.ENOSYS
+}
+
+func (fs *WinfspFS) Chown(path string, uid uint32, gid uint32) int {
+	fs.logger.Logf("[Chown] path=%s uid=%d gid=%d", path, uid, gid)
+	return -common.ENOSYS
+}
+
+func (fs *WinfspFS) Destroy() {
+	fs.logger.Logf("[Destroy] called")
+}
+
+func (fs *WinfspFS) Fsyncdir(path string, datasync bool, fh uint64) int {
+	fs.logger.Logf("[Fsyncdir] path=%s datasync=%v fh=%d", path, datasync, fh)
+	return -common.ENOSYS
+}
+
+func (fs *WinfspFS) Getxattr(path string, name string) (int, []byte) {
+	fs.logger.Logf("[Getxattr] path=%s name=%s", path, name)
+	return -common.ENOSYS, nil
+}
+
+func (fs *WinfspFS) Init() {
+	fs.logger.Logf("[Init] called")
+}
+
+func (fs *WinfspFS) Link(oldpath string, newpath string) int {
+	fs.logger.Logf("[Link] oldpath=%s newpath=%s", oldpath, newpath)
+	return -common.ENOSYS
+}
+
+func (fs *WinfspFS) Listxattr(path string, fill func(name string) bool) int {
+	fs.logger.Logf("[Listxattr] path=%s", path)
+	return -common.ENOSYS
+}
+
+func (fs *WinfspFS) Mknod(path string, mode uint32, dev uint64) int {
+	fs.logger.Logf("[Mknod] path=%s mode=%#o dev=%d", path, mode, dev)
+	return -common.ENOSYS
+}
+
+func (fs *WinfspFS) Readlink(path string) (int, string) {
+	fs.logger.Logf("[Readlink] path=%s", path)
+	return -common.ENOSYS, ""
+}
+
+func (fs *WinfspFS) Removexattr(path string, name string) int {
+	fs.logger.Logf("[Removexattr] path=%s name=%s", path, name)
+	return -common.ENOSYS
+}
+
+func (fs *WinfspFS) Setxattr(path string, name string, value []byte, flags int) int {
+	fs.logger.Logf("[Setxattr] path=%s name=%s flags=%d", path, name, flags)
+	return -common.ENOSYS
+}
+
+func (fs *WinfspFS) Symlink(target string, newpath string) int {
+	fs.logger.Logf("[Symlink] target=%s newpath=%s", target, newpath)
+	return -common.ENOSYS
+}

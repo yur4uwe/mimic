@@ -10,7 +10,7 @@ end box
 
 box "Простір користувача (User Space)" #White
     participant "App\n(Word, ls, etc.)" as App
-    participant "mimic Daemon\n(Go Process)" as Mimic
+    participant "FUSE mount Daemon" as Fmount
 end box
 
 participant "WebDAV Cloud" as Cloud
@@ -18,17 +18,17 @@ participant "WebDAV Cloud" as Cloud
 == Ініціація запиту ==
 App -> VFS: Читання файлу (read)
 VFS -> FUSE: Перенаправлення запиту
-FUSE -> Mimic: FUSE Op (Read Request)
+FUSE -> Fmount: FUSE Op (Read Request)
 
-== Обробка у mimic ==
-activate Mimic
-Mimic -> Mimic: Трансляція у HTTP
-Mimic -> Cloud: HTTP GET (Range: bytes)
+== Обробка у сервісі FUSE ==
+activate Fmount
+Fmount -> Fmount: Трансляція у HTTP
+Fmount -> Cloud: HTTP GET (Range: bytes)
 activate Cloud
-Cloud --> Mimic: 206 Partial Content (Data)
+Cloud --> Fmount: 206 Partial Content (Data)
 deactivate Cloud
-Mimic -> FUSE: Повернення даних
-deactivate Mimic
+Fmount -> FUSE: Повернення даних
+deactivate Fmount
 
 == Повернення результату ==
 FUSE -> VFS: Дані у буфер ядра

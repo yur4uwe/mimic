@@ -77,7 +77,7 @@ func (fs *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle 
 }
 
 func (fs *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
-	fs.logger.Logf("[log] (Create): path=%s flags=%#o mode=%#o", path, flags, mode)
+	fs.logger.Logf("[Create]: path=%s flags=%#o mode=%#o", path, flags, mode)
 
 	if strings.HasSuffix(path, "/") && path != "/" {
 		path = strings.TrimSuffix(path, "/")
@@ -116,6 +116,11 @@ func (fs *WinfspFS) Flush(path string, file_handle uint64) (errc int) {
 		return 0
 	}
 
+	if !fh.IsDirty() {
+		fs.logger.Logf("[Flush] no dirty data for path=%s", path)
+		return 0
+	}
+
 	if !fh.Flags().WriteAllowed() {
 		fs.logger.Errorf("[Flush] access denied for %s, flag state: %+v", path, fh.Flags())
 		return 0
@@ -123,34 +128,52 @@ func (fs *WinfspFS) Flush(path string, file_handle uint64) (errc int) {
 
 	fh.MLock()
 	defer fh.MUnlock()
-	if fh.IsDirty() {
-		buf, off := fh.Buffer()
-		fs.logger.Logf("[Flush] about to write path=%s buffer_len=%d buffer_off=%d", fh.Path(), len(buf), off)
-		if err := fs.client.WriteOffset(fh.Path(), buf, off); err != nil {
-			if common.IsNotExistErr(err) && fh.Flags().Create() {
-				end := off + int64(len(buf))
-				if end > int64(^uint(0)>>1) {
-					fs.logger.Logf("[Flush] too large allocate for %s; returning EIO", fh.Path())
-					return -common.EIO
-				}
-				full := make([]byte, int(end))
-				copy(full[int(off):], buf)
-				if werr := fs.client.Write(fh.Path(), full); werr != nil {
-					fs.logger.Logf("[Flush] client.Write error for %s: %v; returning EIO", fh.Path(), werr)
-					return -common.EIO
-				}
-			} else {
-				fs.logger.Logf("[Flush] client.WriteOffset error for %s: %v; returning EIO", fh.Path(), err)
+	buf, off := fh.Buffer()
+	fs.logger.Logf("[Flush] about to write path=%s buffer_len=%d buffer_off=%d", fh.Path(), len(buf), off)
+	if err := fs.client.WriteOffset(fh.Path(), buf, off); err != nil {
+		if common.IsNotExistErr(err) && fh.Flags().Create() {
+			end := off + int64(len(buf))
+			if end > int64(^uint(0)>>1) {
+				fs.logger.Logf("[Flush] too large allocate for %s; returning EIO", fh.Path())
 				return -common.EIO
 			}
+			full := make([]byte, int(end))
+			copy(full[int(off):], buf)
+			if werr := fs.client.Write(fh.Path(), full); werr != nil {
+				fs.logger.Logf("[Flush] client.Write error for %s: %v; returning EIO", fh.Path(), werr)
+				return -common.EIO
+			}
+		} else {
+			fs.logger.Logf("[Flush] client.WriteOffset error for %s: %v; returning EIO", fh.Path(), err)
+			return -common.EIO
 		}
-		fh.ClearBuffer()
 	}
+	fh.ClearBuffer()
 
 	return 0
 }
 
 func (fs *WinfspFS) Fsync(path string, datasync bool, file_handle uint64) (errc int) {
 	fs.logger.Logf("[Fsync]: path=%s fh=%d datasync=%v", path, file_handle, datasync)
+	return 0
+}
+
+func (fs *WinfspFS) Access(path string, mode uint32) int {
+	fs.logger.Logf("[Access]: path=%s mode=%#o", path, mode)
+	norm, err := casters.NormalizePath(path)
+	if err != nil {
+		fs.logger.Errorf("[Access] Path normalize error for path=%s error=%v", path, err)
+		return -common.EIO
+	}
+
+	_, err = fs.client.Stat(norm)
+	if err != nil {
+		if common.IsNotExistErr(err) {
+			return -common.ENOENT
+		}
+		fs.logger.Errorf("[Access] Stat error for path=%s: %v", path, err)
+		return -common.EIO
+	}
+
 	return 0
 }

@@ -26,7 +26,7 @@ note right of Mimic
 для отримання списку файлів у каталозі.
 end note
 
-loop fetch per-entry Stat_t
+loop Завантаження Stat_t для кожного файлу у кеш
     Mimic --> Cache: Set(/dir/file1.txt, stat_t)
 end
 note right of Mimic
