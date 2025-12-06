@@ -1,0 +1,47 @@
+@startuml Cache_State_Change
+title Cache State Change: File creation in a folder
+skinparam sequenceMessageAlign center
+
+actor "User / OS Explorer" as User
+participant "mimic Core" as Mimic
+participant "Metadata Cache\n(sync.Map)" as Cache
+participant "WebDAV Server" as Server
+
+== Initial State: Cache populated ==
+User -> Mimic: Readdir (/dir)
+activate Mimic
+Mimic -> Cache: Check children (Key: "/dir/")
+Cache --> Mimic: HIT (children list)
+Mimic --> User: Directory entries (cached)
+deactivate Mimic
+
+== File Creation: Cache invalidation ==
+User -> Mimic: Create (/dir/new_file.txt)
+activate Mimic
+Mimic -> Cache: Invalidate("/dir/")
+Mimic -> Server: PUT /dir/new_file.txt
+Server --> Mimic: 201 Created
+Mimic --> User: File created
+deactivate Mimic
+
+note right
+Cache invalidation ensures that the next request to "/dir/"
+fetches updated metadata from the server.
+end note
+
+== Subsequent Request: Fetch updated metadata ==
+User -> Mimic: Readdir (/dir)
+activate Mimic
+Mimic -> Cache: Check children (Key: "/dir/")
+Cache --> Mimic: MISS
+Mimic -> Server: PROPFIND /dir/
+Server --> Mimic: 207 Multi-Status (updated list)
+Mimic -> Cache: SetChildren("/dir/", updated items)
+Mimic --> User: Updated directory entries
+deactivate Mimic
+
+note right
+Other operations like Remove, Rename, Mkdir, and Rmdir
+also invalidate the cache for the affected folder.
+end note
+@enduml

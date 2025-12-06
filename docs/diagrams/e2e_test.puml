@@ -1,0 +1,39 @@
+@startuml E2E_Test_Architecture
+title Архітектура E2E тестування mimic
+top to bottom direction
+skinparam componentStyle uml2
+
+node "Тестове середовище (CI/CD або Local)" {
+
+    component "E2E Test Driver\n(Go Binary)" as Driver
+    
+    together {
+        rectangle "Mount Point" {
+            folder "/tmp/mnt/mimic" as MountDir
+        }
+
+        component "mimic Process" as App
+    }
+
+    component "Mock Server\n(In-Memory WebDAV)" as Mock
+
+}
+
+Driver -left-> MountDir : Виконує системні виклики\n(mkdir, write, mv, cat)
+MountDir <.. App : FUSE Mount
+MountDir --> App : FUSE запити
+App --> Mock : WebDAV запити (localhost:port)
+
+Driver ..> Mock : Перевірка стану бекенду
+
+note right of Driver
+  Емулює реального
+  користувача
+end note
+
+note left of Mock
+  Дозволяє тестувати
+  без реальної мережі
+end note
+
+@enduml

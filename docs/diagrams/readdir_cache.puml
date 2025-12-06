@@ -1,0 +1,61 @@
+@startuml Mimic_Cache_Behavior
+title Поведінка кешу метаданих mimic — Readdir → spawn goroutines → GetAttr hits
+skinparam sequenceMessageAlign center
+
+actor "User / OS Explorer" as User
+participant "mimic Core" as Mimic
+participant "Metadata Cache\n(sync.Map)" as Cache
+participant "WebDAV Server" as Server
+
+note left
+Active blocks (activated participants) denote
+separate goroutines running asynchronously, shown
+as parallel activations on the Mimic lifeline.
+end note
+
+== Холодний старт: Readdir апитує Stat_t для 2 файлів ==
+User -> Mimic: Readdir (/dir)
+activate Mimic
+Mimic -> Cache: Check children (Key: "/dir/")
+Cache --> Mimic: MISS
+Mimic -> Server: PROPFIND /dir/
+Server --> Mimic: 207 Multi-Status (entries list)
+Mimic -> Cache: SetChildren("/dir/", items)
+note right of Mimic
+Якщо кеш порожній, Mimic виконує PROPFIND 
+для отримання списку файлів у каталозі.
+end note
+
+loop fetch per-entry Stat_t
+    Mimic --> Cache: Set(/dir/file1.txt, stat_t)
+end
+note right of Mimic
+Mimic заздалегідь зберігає stat_t кожного файлу в кеші
+після отримання списку каталогів, щоб наступні GetAttr 
+виклики були швидкими.
+end note
+
+Mimic --> User: Directory entries (list)
+deactivate Mimic
+
+== Одночасні GetAttr виклики для кожного файлу ==
+
+User -> Mimic: GetAttr (/dir/file2.txt)
+activate Mimic
+User -> Mimic: GetAttr (/dir/file1.txt)
+activate Mimic
+Mimic -> Cache: Get("/dir/file1.txt")
+Cache --> Mimic: HIT (stat_t)
+Mimic --> User: stat_t (file1)
+deactivate Mimic
+Mimic -> Cache: Get("/dir/file2.txt")
+Cache --> Mimic: HIT (stat_t)
+Mimic --> User: stat_t (file2)
+deactivate Mimic
+
+note right
+Для демонстрації запит 2-го файлу починається раніше,
+хоча виклик GetAttr був другим. Це щоб показати асинхронну 
+природу запитів на PlantUML діаграмі з суцільною активацією.
+end note
+@enduml

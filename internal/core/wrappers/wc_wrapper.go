@@ -76,6 +76,9 @@ func (w *WebdavClient) ReadDir(name string) ([]os.FileInfo, error) {
 	}
 
 	w.cache.SetChildren(name, infos)
+	for _, fi := range infos {
+		w.cache.Set(path.Join(name, fi.Name()), w.cache.NewEntry(fi))
+	}
 
 	return infos, nil
 }

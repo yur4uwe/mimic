@@ -1,0 +1,37 @@
+@startuml FUSE_Request_Path
+title Шлях запиту читання файлу через FUSE до WebDAV Cloud
+skinparam sequenceMessageAlign center
+skinparam boxPadding 10
+
+box "Простір ядра (Kernel Space)" #LightGray
+    participant "VFS / System Call" as VFS
+    participant "FUSE Kernel Module" as FUSE
+end box
+
+box "Простір користувача (User Space)" #White
+    participant "App\n(Word, ls, etc.)" as App
+    participant "mimic Daemon\n(Go Process)" as Mimic
+end box
+
+participant "WebDAV Cloud" as Cloud
+
+== Ініціація запиту ==
+App -> VFS: Читання файлу (read)
+VFS -> FUSE: Перенаправлення запиту
+FUSE -> Mimic: FUSE Op (Read Request)
+
+== Обробка у mimic ==
+activate Mimic
+Mimic -> Mimic: Трансляція у HTTP
+Mimic -> Cloud: HTTP GET (Range: bytes)
+activate Cloud
+Cloud --> Mimic: 206 Partial Content (Data)
+deactivate Cloud
+Mimic -> FUSE: Повернення даних
+deactivate Mimic
+
+== Повернення результату ==
+FUSE -> VFS: Дані у буфер ядра
+VFS -> App: Результат читання
+
+@enduml

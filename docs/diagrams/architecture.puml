@@ -1,0 +1,50 @@
+@startuml Mimic_Architecture
+title Архітектура системи mimic
+skinparam componentStyle rectangle
+
+component "Linux" as Linux {
+    [libfuse / FUSE] as FUSE_Linux
+}
+component "Windows" as Windows {
+    [WinFSP driver] as WinFSP
+    [libfuse (compat)] as FUSE_Win_compat
+}
+
+package "mimic (Go Application)" {
+    
+    component "cgofuse" as Adapter {
+        [VFS Layer (FileSystem Impl)] as VFSImpl
+    }
+    
+    package "Core Logic" {
+        [File System Op Callbacks] as FSCallbacks
+        [Metadata Cache (sync.Map)] as Cache
+        [File Handle Manager] as Handles
+    }
+
+    component "Network Layer" {
+        [WebDAV Client (gowebdav)] as Client
+        [HTTP Transport (net/http)] as HTTP
+    }
+}
+
+cloud "Remote Storage" {
+    [Nextcloud / Apache] as Cloud
+}
+
+FUSE_Linux <--> Adapter : FUSE Protocol
+WinFSP <--> FUSE_Win_compat : Translate FUSE to WinFSP API
+FUSE_Win_compat <--> Adapter : WinFSP API
+VFSImpl <--> FSCallbacks : Invoke Callbacks
+FSCallbacks --> Cache : Metadata Operations
+FSCallbacks --> Handles : File Handle Operations
+FSCallbacks -right-> Client : WebDAV Methods
+Client --> HTTP
+HTTP <-right-> Cloud : HTTPS (XML/Data)
+
+note right of Adapter
+  Забезпечує кросплатформність
+  (Linux & Windows)
+end note
+
+@enduml
