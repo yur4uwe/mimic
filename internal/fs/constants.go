@@ -1,4 +1,4 @@
-package common
+package fs
 
 // Error codes
 // Headers are incorrectly imported on Windows

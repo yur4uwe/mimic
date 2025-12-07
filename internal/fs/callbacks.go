@@ -1,14 +1,12 @@
 package fs
 
 import (
-	"io"
 	"os"
-	"sync/atomic"
 
 	"github.com/mimic/internal/core/casters"
 	"github.com/mimic/internal/core/checks"
 	"github.com/mimic/internal/core/flags"
-	"github.com/mimic/internal/fs/common"
+	"github.com/mimic/internal/core/helpers"
 	"github.com/winfsp/cgofuse/fuse"
 	fuselib "github.com/winfsp/cgofuse/fuse"
 )
@@ -17,31 +15,6 @@ const (
 	DEFAULT_BLOCK_SIZE = 4096
 	READ_LEN           = 1024 * 1024
 )
-
-type openedFile struct {
-	common.FileHandle
-	size int64
-	stat *fuselib.Stat_t
-}
-
-func (fs *WinfspFS) NewHandle(path string, stat *fuselib.Stat_t, oflags uint32) uint64 {
-	file_handle := atomic.AddUint64(&fs.nextHandle, 1)
-	fs.handles.Store(file_handle, &openedFile{
-		FileHandle: *common.NewFilehandle(path, flags.OpenFlag(oflags)),
-		size:       stat.Size,
-		stat:       stat,
-	})
-	return file_handle
-}
-
-func (fs *WinfspFS) GetHandle(handle uint64) (*openedFile, bool) {
-	file, ok := fs.handles.Load(handle)
-	if !ok {
-		return nil, false
-	}
-	of := file.(*openedFile)
-	return of, true
-}
 
 func (fs *WinfspFS) Getattr(p string, stat *fuselib.Stat_t, fh uint64) int {
 	if p == "/" {
@@ -61,12 +34,11 @@ func (fs *WinfspFS) Getattr(p string, stat *fuselib.Stat_t, fh uint64) int {
 	norm, err := casters.NormalizePath(p)
 	if err != nil {
 		fs.logger.Errorf("[Getattr] Path normalize error for path=%s error=%v", p, err)
-		return -common.ENOENT
+		return -ENOENT
 	}
 
 	if fi, ok := fs.GetHandle(fh); ^uint64(0) != fh && ok {
 		*stat = *fi.stat
-		stat.Size = fi.size
 
 		fs.logger.Logf("[Getattr] found handle path=%s fh=%d mode=%#o size=%d", norm, fh, stat.Mode, stat.Size)
 		return 0
@@ -74,17 +46,17 @@ func (fs *WinfspFS) Getattr(p string, stat *fuselib.Stat_t, fh uint64) int {
 
 	file, err := fs.client.Stat(norm)
 	if err != nil {
-		if common.IsNotExistErr(err) {
+		if helpers.IsNotExistErr(err) {
 			fs.logger.Errorf("[Getattr] stat: %s not found: %v; returning ENOENT", norm, err)
-			return -common.ENOENT
+			return -ENOENT
 		}
 		fs.logger.Errorf("[Getattr] stat error for %s: %v; returning EIO", norm, err)
-		return -common.EIO
+		return -EIO
 	}
 
 	if checks.IsNilInterface(file) {
 		fs.logger.Errorf("[Getattr] nil fileinfo for %s; returning ENOENT", norm)
-		return -common.ENOENT
+		return -ENOENT
 	}
 
 	*stat = *casters.FileInfoCast(file)
@@ -103,16 +75,16 @@ func (fs *WinfspFS) Open(path string, oflags int) (int, uint64) {
 		err = os.ErrNotExist
 	}
 
-	if flags.Create() && common.IsNotExistErr(err) {
+	if flags.Create() && helpers.IsNotExistErr(err) {
 		if err := fs.client.Create(path); err != nil {
 			fs.logger.Errorf("[Open] remote create failed path=%s err=%v", path, err)
-			return -common.EIO, 0
+			return -EIO, 0
 		}
 	}
 
-	if flags.Exclusive() && !common.IsNotExistErr(err) {
+	if flags.Exclusive() && !helpers.IsNotExistErr(err) {
 		fs.logger.Errorf("[Open] file exists and exclusive flag set path=%s", path)
-		return -common.EEXIST, 0
+		return -EEXIST, 0
 	}
 
 	handle := fs.NewHandle(path, casters.FileInfoCast(fi), uint32(flags))
@@ -122,50 +94,13 @@ func (fs *WinfspFS) Open(path string, oflags int) (int, uint64) {
 	return 0, handle
 }
 
-func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle uint64) int {
-	fs.logger.Logf("[Read] path=%s offset=%d len=%d fh=%d", path, offset, len(buffer), file_handle)
-
-	file, ok := fs.GetHandle(file_handle)
-	if !ok {
-		fs.logger.Errorf("[Read] invalid file handle=%d for path=%s", file_handle, path)
-		return -common.EIO
-	}
-
-	if !file.Flags().ReadAllowed() {
-		fs.logger.Errorf("[Read] access denied for %s, flag state: %+v", path, file.Flags())
-		return -common.EACCES
-	}
-
-	if offset >= file.size {
-		return 0 // EOF
-	}
-
-	toRead := len(buffer)
-	rc, err := fs.client.ReadRange(file.Path(), offset, int64(toRead))
-	if err != nil {
-		fs.logger.Errorf("[Read] ReadRange error for %s offset=%d len=%d: %v", path, offset, toRead, err)
-		return -common.EIO
-	}
-	defer rc.Close()
-
-	n, err := io.ReadFull(rc, buffer)
-	if err == io.ErrUnexpectedEOF || err == io.EOF {
-		return n
-	} else if err != nil {
-		fs.logger.Errorf("[Read] ReadFull error for %s offset=%d len=%d: %v", path, offset, toRead, err)
-		return -common.EIO
-	}
-
-	return n
-}
-
 func (fs *WinfspFS) Rename(oldPath string, newPath string) int {
 	fs.logger.Logf("[Rename] from=%s to=%s", oldPath, newPath)
 
 	err := fs.client.Rename(oldPath, newPath)
 	if err != nil {
 		fs.logger.Errorf("[Rename] rename error from %s to %s: %v", oldPath, newPath, err)
-		return -common.EIO
+		return -EIO
 	}
 
 	return 0
@@ -195,12 +130,12 @@ func (fs *WinfspFS) Statfs(path string, stat *fuse.Statfs_t) int {
 
 func (fs *WinfspFS) Chmod(path string, mode uint32) int {
 	fs.logger.Logf("[Chmod] path=%s mode=%#o", path, mode)
-	return -common.ENOSYS
+	return -ENOSYS
 }
 
 func (fs *WinfspFS) Chown(path string, uid uint32, gid uint32) int {
 	fs.logger.Logf("[Chown] path=%s uid=%d gid=%d", path, uid, gid)
-	return -common.ENOSYS
+	return -ENOSYS
 }
 
 func (fs *WinfspFS) Destroy() {
@@ -209,12 +144,12 @@ func (fs *WinfspFS) Destroy() {
 
 func (fs *WinfspFS) Fsyncdir(path string, datasync bool, fh uint64) int {
 	fs.logger.Logf("[Fsyncdir] path=%s datasync=%v fh=%d", path, datasync, fh)
-	return -common.ENOSYS
+	return -ENOSYS
 }
 
 func (fs *WinfspFS) Getxattr(path string, name string) (int, []byte) {
 	fs.logger.Logf("[Getxattr] path=%s name=%s", path, name)
-	return -common.ENOSYS, nil
+	return -ENOSYS, nil
 }
 
 func (fs *WinfspFS) Init() {
@@ -223,35 +158,35 @@ func (fs *WinfspFS) Init() {
 
 func (fs *WinfspFS) Link(oldpath string, newpath string) int {
 	fs.logger.Logf("[Link] oldpath=%s newpath=%s", oldpath, newpath)
-	return -common.ENOSYS
+	return -ENOSYS
 }
 
 func (fs *WinfspFS) Listxattr(path string, fill func(name string) bool) int {
 	fs.logger.Logf("[Listxattr] path=%s", path)
-	return -common.ENOSYS
+	return -ENOSYS
 }
 
 func (fs *WinfspFS) Mknod(path string, mode uint32, dev uint64) int {
 	fs.logger.Logf("[Mknod] path=%s mode=%#o dev=%d", path, mode, dev)
-	return -common.ENOSYS
+	return -ENOSYS
 }
 
 func (fs *WinfspFS) Readlink(path string) (int, string) {
 	fs.logger.Logf("[Readlink] path=%s", path)
-	return -common.ENOSYS, ""
+	return -ENOSYS, ""
 }
 
 func (fs *WinfspFS) Removexattr(path string, name string) int {
 	fs.logger.Logf("[Removexattr] path=%s name=%s", path, name)
-	return -common.ENOSYS
+	return -ENOSYS
 }
 
 func (fs *WinfspFS) Setxattr(path string, name string, value []byte, flags int) int {
 	fs.logger.Logf("[Setxattr] path=%s name=%s flags=%d", path, name, flags)
-	return -common.ENOSYS
+	return -ENOSYS
 }
 
 func (fs *WinfspFS) Symlink(target string, newpath string) int {
 	fs.logger.Logf("[Symlink] target=%s newpath=%s", target, newpath)
-	return -common.ENOSYS
+	return -ENOSYS
 }

@@ -106,3 +106,57 @@ func MergeBufferIntoBase(base []byte, buffer []byte) []byte {
 	copy(merged[:len(buffer)], buffer)
 	return merged
 }
+
+// MergeRemoteAndBuffer merges a remote slice (which represents bytes starting at
+// remoteStart) and an in-memory buffer (bufData starting at bufStart) into the
+// requested window [reqStart, reqStart+reqLen). Bytes from bufData override
+// remote when they overlap. The returned slice length is up to reqLen and may
+// be shorter (EOF semantics).
+func MergeRemoteAndBuffer(remote []byte, remoteStart int64, bufData []byte, bufStart int64, reqStart int64, reqLen int) []byte {
+	reqEnd := reqStart + int64(reqLen)
+
+	remoteLen := int64(len(remote))
+	remoteEnd := remoteStart + remoteLen
+
+	bufLen := int64(len(bufData))
+	bufEnd := bufStart + bufLen
+
+	// Determine the merged coverage within the requested window
+	maxEnd := min(max(bufEnd, max(remoteEnd, reqStart)), reqEnd)
+	if maxEnd <= reqStart {
+		return []byte{}
+	}
+
+	outLen := int(maxEnd - reqStart)
+	out := make([]byte, outLen)
+
+	// Copy any overlapping remote data into out
+	if remoteLen > 0 {
+		start := max(remoteStart, reqStart)
+		end := min(remoteEnd, reqEnd)
+		if end > start {
+			dst := int(start - reqStart)
+			src := int(start - remoteStart)
+			copy(out[dst:dst+int(end-start)], remote[src:src+int(end-start)])
+		}
+	}
+
+	// Overlay buffer data (buffer dominates remote)
+	if bufLen > 0 {
+		start := bufStart
+		if start < reqStart {
+			start = reqStart
+		}
+		end := bufEnd
+		if end > reqEnd {
+			end = reqEnd
+		}
+		if end > start {
+			dst := int(start - reqStart)
+			src := int(start - bufStart)
+			copy(out[dst:dst+int(end-start)], bufData[src:src+int(end-start)])
+		}
+	}
+
+	return out
+}

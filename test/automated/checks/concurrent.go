@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -12,7 +13,7 @@ import (
 
 // CheckConcurrentAppendRead performs concurrent appends and a reader tailing the file.
 func CheckConcurrentAppendRead(base string) (retErr error) {
-	fpath := filepath.Join(base, "stream.txt")
+	fpath := filepath.Join(base, "stream.concurrent")
 	_ = os.RemoveAll(fpath)
 
 	const n = 5
@@ -20,18 +21,20 @@ func CheckConcurrentAppendRead(base string) (retErr error) {
 	appendCh := make(chan error, 1)
 	readCh := make(chan error, 1)
 
-	var appendErr, readErr error
+	start := time.Now()
+	log.Printf("[CheckConcurrentAppendRead] start path=%s", fpath)
 
 	if err := os.WriteFile(fpath, []byte{}, 0644); err != nil {
-		retErr = err
-		goto cleanup
+		log.Printf("[CheckConcurrentAppendRead] initial write failed (elapsed=%s): %v", time.Since(start), err)
+		return err
 	}
 
 	wg.Add(2)
-
+	appendStart := time.Now()
 	go func() {
 		defer wg.Done()
-		for i := range n {
+		log.Printf("[appendRoutine] start (n=%d)", n)
+		for i := 0; i < n; i++ {
 			f, err := os.OpenFile(fpath, os.O_WRONLY|os.O_APPEND, 0644)
 			if err != nil {
 				appendCh <- fmt.Errorf("open for append error: %v", err)
@@ -46,19 +49,21 @@ func CheckConcurrentAppendRead(base string) (retErr error) {
 			time.Sleep(100 * time.Millisecond)
 		}
 		appendCh <- nil
+		log.Printf("[appendRoutine] done (elapsed=%s)", time.Since(appendStart))
 	}()
 
+	readStart := time.Now()
 	// reader: read newly appended bytes and update last by bytes actually read
 	go func() {
 		defer wg.Done()
 		seen := 0
 		var last int64 = 0
-		start := time.Now()
+		startReader := time.Now()
 		timeout := 5 * time.Second
 
+		log.Printf("[readRoutine] start (expect=%d)", n)
 		for seen < n {
-			// timeout to avoid infinite hang
-			if time.Since(start) > timeout {
+			if time.Since(startReader) > timeout {
 				readCh <- fmt.Errorf("timeout waiting for %d entries, seen %d", n, seen)
 				return
 			}
@@ -110,21 +115,37 @@ func CheckConcurrentAppendRead(base string) (retErr error) {
 			time.Sleep(50 * time.Millisecond)
 		}
 		readCh <- nil
+		log.Printf("[readRoutine] done (elapsed=%s)", time.Since(startReader))
 	}()
 
 	wg.Wait()
-	appendErr = <-appendCh
-	readErr = <-readCh
+	appendErr := <-appendCh
+	readErr := <-readCh
+
+	summarizeSub("Concurrent append/read", "appendRoutine", appendErr, time.Since(appendStart))
+	summarizeSub("Concurrent append/read", "readRoutine", readErr, time.Since(readStart))
+
 	if appendErr != nil {
 		retErr = appendErr
+		log.Printf("[CheckConcurrentAppendRead] append error (elapsed=%s): %v", time.Since(start), appendErr)
 		goto cleanup
 	}
 	if readErr != nil {
 		retErr = readErr
+		log.Printf("[CheckConcurrentAppendRead] read error (elapsed=%s): %v", time.Since(start), readErr)
 		goto cleanup
 	}
 
 cleanup:
 	_ = os.RemoveAll(fpath)
+	log.Printf("[CheckConcurrentAppendRead] finished (total elapsed=%s) err=%v", time.Since(start), retErr)
 	return
+}
+
+func summarizeSub(parent, name string, err error, dur time.Duration) {
+	if err != nil {
+		log.Printf("[FAIL] %s/%s: Error encountered: %v (took %s)", parent, name, err, dur)
+	} else {
+		log.Printf("[PASS] %s/%s: Check succeeded (took %s)", parent, name, dur)
+	}
 }

@@ -2,6 +2,7 @@ package flags
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/mimic/internal/core/flags"
@@ -58,15 +59,32 @@ func TestOpenFlagBasics(t *testing.T) {
 			wantTruncate:  false,
 			wantExclusive: true,
 		},
+		{
+			name:          "no flags",
+			val:           0,
+			wantRead:      true, // default behavior
+			wantWrite:     false,
+			wantAppend:    false,
+			wantCreate:    false,
+			wantTruncate:  false,
+			wantExclusive: false,
+		},
+		{
+			name:          "read/write create truncate",
+			val:           uint32(os.O_RDWR | os.O_CREATE | os.O_TRUNC),
+			wantRead:      true,
+			wantWrite:     true,
+			wantAppend:    false,
+			wantCreate:    true,
+			wantTruncate:  true,
+			wantExclusive: false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := flags.OpenFlag(tt.val)
 
-			// ReadAllowed / WriteAllowed semantics: tests assume POSIX-like behavior:
-			// - ReadAllowed: true unless O_WRONLY is set
-			// - WriteAllowed: true if O_WRONLY or O_RDWR is set
 			gotRead := f.ReadAllowed()
 			gotWrite := f.WriteAllowed()
 
@@ -89,6 +107,33 @@ func TestOpenFlagBasics(t *testing.T) {
 			}
 			if f.Exclusive() != tt.wantExclusive {
 				t.Fatalf("Exclusive: flag=%#x got=%v want=%v", tt.val, f.Exclusive(), tt.wantExclusive)
+			}
+		})
+	}
+}
+
+func TestOpenFlagString(t *testing.T) {
+	tests := []struct {
+		name string
+		val  uint32
+		want string
+	}{
+		{"read only", uint32(os.O_RDONLY), "O_RDONLY"},
+		{"write only", uint32(os.O_WRONLY), "O_WRONLY"},
+		{"read/write", uint32(os.O_RDWR), "O_RDWR"},
+		{"create", uint32(os.O_CREATE), "O_CREATE"},
+		{"truncate", uint32(os.O_TRUNC), "O_TRUNC"},
+		{"append", uint32(os.O_APPEND), "O_APPEND"},
+		{"exclusive", uint32(os.O_EXCL), "O_EXCL"},
+		{"read/write create truncate", uint32(os.O_RDWR | os.O_CREATE | os.O_TRUNC), "O_RDWR|O_CREATE|O_TRUNC"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := flags.OpenFlag(tt.val)
+			got := f.String()
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("String: flag=%#x got=%q want=%q", tt.val, got, tt.want)
 			}
 		})
 	}

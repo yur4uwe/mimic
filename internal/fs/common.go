@@ -1,25 +1,28 @@
-package common
+package fs
 
 import (
-	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/mimic/internal/core/flags"
+	fuselib "github.com/winfsp/cgofuse/fuse"
 )
 
 type FileHandle struct {
 	path  string
 	flags flags.OpenFlag
+	stat  *fuselib.Stat_t
 
 	mu     sync.Mutex
 	buffer []byte
 	offset int64
 }
 
-func NewFilehandle(path string, oflags flags.OpenFlag) *FileHandle {
+func NewFilehandle(path string, oflags flags.OpenFlag, stat *fuselib.Stat_t) *FileHandle {
 	return &FileHandle{
 		path:  path,
 		flags: oflags,
+		stat:  stat,
 	}
 }
 
@@ -81,9 +84,17 @@ func (fh *FileHandle) Path() string {
 	return fh.path
 }
 
-func IsNotExistErr(err error) bool {
-	if err == nil {
-		return false
+func (fs *WinfspFS) NewHandle(path string, stat *fuselib.Stat_t, oflags uint32) uint64 {
+	file_handle := atomic.AddUint64(&fs.nextHandle, 1)
+	fs.handles.Store(file_handle, NewFilehandle(path, flags.OpenFlag(oflags), stat))
+	return file_handle
+}
+
+func (fs *WinfspFS) GetHandle(handle uint64) (*FileHandle, bool) {
+	file, ok := fs.handles.Load(handle)
+	if !ok {
+		return nil, false
 	}
-	return strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found")
+	of := file.(*FileHandle)
+	return of, true
 }
