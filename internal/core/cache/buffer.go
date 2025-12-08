@@ -2,13 +2,14 @@ package cache
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 )
 
 var (
-	NegativeLengthError = errors.New("negative length")
-	NegativeOffsetError = errors.New("negative offset")
-	OutOfBoundsError    = errors.New("read/write out of bounds")
+	ErrNegativeLength = errors.New("negative length")
+	ErrNegativeOffset = errors.New("negative offset")
+	ErrOutOfBounds    = errors.New("read/write out of bounds")
 )
 
 // FileBuffer represents a file image kept in memory for a mapped path.
@@ -45,22 +46,28 @@ func (fb *FileBuffer) SetBase(b int64) {
 
 func (fb *FileBuffer) ReadAt(offset int64, length int) ([]byte, error) {
 	if length < 0 {
-		return nil, NegativeLengthError
+		return nil, ErrNegativeLength
 	}
 	fb.mu.RLock()
 	defer fb.mu.RUnlock()
 
 	if offset < 0 {
-		return nil, NegativeOffsetError
+		return nil, ErrNegativeOffset
 	}
 	end := offset + int64(length)
 	if end > int64(len(fb.Data)) {
-		return nil, OutOfBoundsError
+		return nil, ErrOutOfBounds
 	}
 
 	out := make([]byte, length)
 	copy(out, fb.Data[offset:end])
 	return out, nil
+}
+
+func (fb *FileBuffer) String() string {
+	fb.mu.RLock()
+	defer fb.mu.RUnlock()
+	return fmt.Sprintf("Buffer: dirty=%v base=%d len=%d", fb.Dirty, fb.Base, len(fb.Data))
 }
 
 // WriteAt writes data at the given offset, growing the buffer if needed.
@@ -70,18 +77,44 @@ func (fb *FileBuffer) WriteAt(offset int64, data []byte) error {
 		return nil
 	}
 	if offset < 0 {
-		return NegativeOffsetError
+		return ErrNegativeOffset
 	}
 	fb.mu.Lock()
 	defer fb.mu.Unlock()
 
-	end := offset + int64(len(data))
-	if end > int64(len(fb.Data)) {
-		newData := make([]byte, end)
-		copy(newData, fb.Data)
-		fb.Data = newData
+	if len(fb.Data) == 0 {
+		fb.Base = offset
+		fb.Data = make([]byte, len(data))
+		copy(fb.Data, data)
+		fb.Dirty = true
+		return nil
 	}
-	copy(fb.Data[offset:end], data)
+
+	relStart := offset - fb.Base
+
+	if relStart >= 0 {
+		end := relStart + int64(len(data))
+		if end > int64(len(fb.Data)) {
+			newData := make([]byte, end)
+			copy(newData, fb.Data)
+			fb.Data = newData
+		}
+		copy(fb.Data[relStart:end], data)
+		fb.Dirty = true
+		return nil
+	}
+
+	// relStart < 0: incoming write starts before current base; prepend.
+	// Calculate how many bytes we need to prepend.
+	prepend := int64(0 - relStart)
+	newLen := prepend + int64(len(fb.Data))
+	newData := make([]byte, newLen)
+	// copy incoming data at offset 0
+	copy(newData[0:int64(len(data))], data)
+	// copy existing data after the prepend region
+	copy(newData[prepend:newLen], fb.Data)
+	fb.Base = offset
+	fb.Data = newData
 	fb.Dirty = true
 	return nil
 }

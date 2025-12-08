@@ -16,7 +16,6 @@ type FileHandle struct {
 
 	mu     sync.Mutex
 	buffer *cache.FileBuffer
-	offset int64
 }
 
 func NewFilehandle(path string, oflags flags.OpenFlag, stat *fuselib.Stat_t) *FileHandle {

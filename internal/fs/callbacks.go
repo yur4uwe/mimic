@@ -7,7 +7,6 @@ import (
 	"github.com/mimic/internal/core/checks"
 	"github.com/mimic/internal/core/flags"
 	"github.com/mimic/internal/core/helpers"
-	"github.com/winfsp/cgofuse/fuse"
 	fuselib "github.com/winfsp/cgofuse/fuse"
 )
 
@@ -69,6 +68,13 @@ func (fs *WinfspFS) Getattr(p string, stat *fuselib.Stat_t, fh uint64) int {
 
 	*stat = *casters.FileInfoCast(file)
 
+	buf, ok := fs.bufferCache.Get(norm)
+	if ok {
+		bufSize := buf.Size()
+		bufBase := buf.BasePos()
+		stat.Size = max(stat.Size, bufBase+bufSize)
+	}
+
 	fs.logger.Logf("[Getattr] path=%s has fh=%t mode=%#o size=%d", norm, fh^(^uint64(0)) == 0, file.Mode(), file.Size())
 
 	return 0
@@ -114,13 +120,13 @@ func (fs *WinfspFS) Rename(oldPath string, newPath string) int {
 	return 0
 }
 
-func (fs *WinfspFS) Utimens(path string, times []fuse.Timespec) int {
+func (fs *WinfspFS) Utimens(path string, times []fuselib.Timespec) int {
 	fs.logger.Logf("[Utimens] path=%s times=%#v", path, times)
 	// no direct support for setting times in WebDAV; ignore for now
 	return 0
 }
 
-func (fs *WinfspFS) Statfs(path string, stat *fuse.Statfs_t) int {
+func (fs *WinfspFS) Statfs(path string, stat *fuselib.Statfs_t) int {
 	fs.logger.Logf("[Statfs] path=%s", path)
 
 	stat.Bsize = DEFAULT_BLOCK_SIZE

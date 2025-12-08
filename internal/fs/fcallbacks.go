@@ -62,7 +62,6 @@ func (fs *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle 
 		return -EIO
 	}
 
-	fs.logger.Logf("[Write]: path=%s fh=%d offset=%d len=%d flags=%s", path, file_handle, offset, len(buffer), file.Flags())
 	if !file.Flags().WriteAllowed() {
 		fs.logger.Errorf("[Write] access denied for %s, flag state: %+v", path, file.Flags())
 		return -EACCES
@@ -70,7 +69,16 @@ func (fs *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle 
 
 	file.MLock()
 	file.AddToBuffer(offset, buffer)
+	end := offset + int64(len(buffer))
+	if file.stat != nil {
+		if end > file.stat.Size {
+			file.stat.Size = end
+		}
+	}
 	file.MUnlock()
+
+	bufCopy, bufBase := file.CopyBuffer()
+	fs.logger.Logf("[Write] buffer after write path=%s base=%d len=%d dirty=%v", path, bufBase, len(bufCopy), file.IsDirty())
 
 	return len(buffer)
 }
@@ -183,6 +191,7 @@ func (fs *WinfspFS) Access(path string, mode uint32) int {
 }
 
 func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle uint64) int {
+
 	fh, ok := fs.GetHandle(file_handle)
 	if !ok {
 		fs.logger.Errorf("[Read] invalid file handle=%d for path=%s", file_handle, path)
@@ -227,6 +236,8 @@ func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle u
 			remoteBuf = remoteBuf[:reqLen]
 		}
 		n := copy(buffer, remoteBuf)
+
+		fs.logger.Logf("[Read] clean for %s offset=%d len=%d returned %d bytes", path, reqStart, reqLen, n)
 		return n
 	}
 
@@ -240,6 +251,7 @@ func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle u
 			if helpers.IsNotExistErr(err) {
 				remoteBuf = []byte{}
 			} else if helpers.IsForbiddenErr(err) {
+				fs.logger.Errorf("[Read] ReadRange forbidden for %s offset=%d len=%d: %v", path, reqStart, reqLen, err)
 				return -EACCES
 			} else {
 				fs.logger.Errorf("[Read] ReadRange error for %s offset=%d len=%d: %v", path, reqStart, reqLen, err)
@@ -255,6 +267,7 @@ func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle u
 
 	// Merge remote bytes and dirty buffer (buffer overrides remote)
 	merged := helpers.MergeRemoteAndBuffer(remoteBuf, reqStart, bufData, bufBase, reqStart, int(reqLen))
+	fs.logger.Logf("[Read] merged buffer for %s offset=%d len=%d remote_len=%d buf_len=%d merged_len=%d", path, reqStart, reqLen, len(remoteBuf), len(bufData), len(merged))
 	if len(merged) == 0 {
 		return 0
 	}

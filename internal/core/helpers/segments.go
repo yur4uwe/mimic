@@ -143,14 +143,8 @@ func MergeRemoteAndBuffer(remote []byte, remoteStart int64, bufData []byte, bufS
 
 	// Overlay buffer data (buffer dominates remote)
 	if bufLen > 0 {
-		start := bufStart
-		if start < reqStart {
-			start = reqStart
-		}
-		end := bufEnd
-		if end > reqEnd {
-			end = reqEnd
-		}
+		start := max(bufStart, reqStart)
+		end := min(bufEnd, reqEnd)
 		if end > start {
 			dst := int(start - reqStart)
 			src := int(start - bufStart)

@@ -222,6 +222,8 @@ func checkO_APPEND(fpath string) error {
 		return err
 	}
 
+	time.Sleep(100 * time.Millisecond) // ensure something changes
+
 	b, err := os.ReadFile(fpath)
 	if err != nil {
 		log.Printf("[checkO_APPEND] readfile failed after %s: %v", time.Since(start), err)
