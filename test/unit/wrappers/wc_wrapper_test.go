@@ -2,7 +2,6 @@ package wrappers
 
 import (
 	"bytes"
-	"io"
 	"testing"
 	"time"
 
@@ -59,21 +58,16 @@ func TestReadRange(t *testing.T) {
 	backend.Set(name, data)
 
 	// request first 10 bytes via public ReadRange API
-	rc, err := wc.ReadRange(name, 0, 10)
+	rb, err := wc.ReadRange(name, 0, 10)
 	if err != nil {
 		t.Fatalf("ReadRange failed: %v", err)
 	}
-	defer rc.Close()
-	got, err := io.ReadAll(rc)
-	if err != nil {
-		t.Fatalf("reading range failed: %v", err)
-	}
 
-	if len(got) != 10 {
-		t.Fatalf("expected 10 bytes, got %d", len(got))
+	if len(rb) != 10 {
+		t.Fatalf("expected 10 bytes, got %d", len(rb))
 	}
-	if !bytes.Equal(got, data[:10]) {
-		t.Fatalf("range mismatch: got=%q want=%q", got, data[:10])
+	if !bytes.Equal(rb, data[:10]) {
+		t.Fatalf("range mismatch: got=%q want=%q", rb, data[:10])
 	}
 }
 

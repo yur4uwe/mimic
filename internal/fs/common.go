@@ -4,6 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/mimic/internal/core/cache"
 	"github.com/mimic/internal/core/flags"
 	fuselib "github.com/winfsp/cgofuse/fuse"
 )
@@ -14,7 +15,7 @@ type FileHandle struct {
 	stat  *fuselib.Stat_t
 
 	mu     sync.Mutex
-	buffer []byte
+	buffer *cache.FileBuffer
 	offset int64
 }
 
@@ -39,41 +40,34 @@ func (fh *FileHandle) AddToBuffer(offset int64, data []byte) {
 		return
 	}
 	if fh.buffer == nil {
-		fh.offset = offset
-		fh.buffer = make([]byte, len(data))
-		copy(fh.buffer, data)
-		return
+		// defensive: create per-handle buffer if not set (should be set by fs.NewHandle)
+		fh.buffer = &cache.FileBuffer{Data: make([]byte, 0)}
+		fh.buffer.IncHandle()
 	}
-
-	if offset < fh.offset {
-		shift := fh.offset - offset
-		newLen := int(shift) + len(fh.buffer)
-		newBuf := make([]byte, newLen)
-		copy(newBuf[int(shift):], fh.buffer)
-		fh.buffer = newBuf
-		fh.offset = offset
-	}
-
-	rel := int(offset - fh.offset)
-	end := rel + len(data)
-	if end > len(fh.buffer) {
-		nb := make([]byte, end)
-		copy(nb, fh.buffer)
-		fh.buffer = nb
-	}
-	copy(fh.buffer[rel:end], data)
+	// Use absolute offsets (current code treats buffer Data[0] as file offset 0).
+	_ = fh.buffer.WriteAt(offset, data)
 }
 
+// ClearBuffer clears the shared buffer (used after a successful Flush/Release).
 func (fh *FileHandle) ClearBuffer() {
+	if fh.buffer == nil {
+		return
+	}
+	fh.buffer.Clear()
+	fh.buffer.DecHandle()
 	fh.buffer = nil
 }
 
-func (fh *FileHandle) Buffer() ([]byte, int64) {
-	return fh.buffer, fh.offset
+// nil, 0 if no buffer
+func (fh *FileHandle) CopyBuffer() ([]byte, int64) {
+	if fh.buffer == nil {
+		return nil, 0
+	}
+	return fh.buffer.CopyBuffer()
 }
 
 func (fh *FileHandle) IsDirty() bool {
-	return fh.buffer != nil
+	return fh.buffer != nil && fh.buffer.Dirty
 }
 
 func (fh *FileHandle) Flags() flags.OpenFlag {
@@ -86,7 +80,13 @@ func (fh *FileHandle) Path() string {
 
 func (fs *WinfspFS) NewHandle(path string, stat *fuselib.Stat_t, oflags uint32) uint64 {
 	file_handle := atomic.AddUint64(&fs.nextHandle, 1)
-	fs.handles.Store(file_handle, NewFilehandle(path, flags.OpenFlag(oflags), stat))
+	fh := NewFilehandle(path, flags.OpenFlag(oflags), stat)
+
+	fb := fs.bufferCache.GetOrCreate(path)
+	fb.IncHandle()
+	fh.buffer = fb
+
+	fs.handles.Store(file_handle, fh)
 	return file_handle
 }
 

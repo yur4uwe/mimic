@@ -89,12 +89,21 @@ func (w *WebdavClient) Read(name string) ([]byte, error) {
 	return w.client.Read(name)
 }
 
-func (w *WebdavClient) ReadStream(name string) (io.ReadCloser, error) {
-	return w.client.ReadStream(name)
-}
+func (w *WebdavClient) ReadRange(name string, offset, length int64) ([]byte, error) {
+	rc, err := w.client.ReadStreamRange(name, offset, length)
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
 
-func (w *WebdavClient) ReadRange(name string, offset, length int64) (io.ReadCloser, error) {
-	return w.client.ReadStreamRange(name, offset, length)
+	buf := make([]byte, length)
+	n, err := io.ReadFull(rc, buf)
+	if err == io.ErrUnexpectedEOF || err == io.EOF {
+		return buf[:n], nil
+	} else if err != nil {
+		return nil, err
+	}
+	return buf, nil
 }
 
 func (w *WebdavClient) Write(name string, data []byte) error {

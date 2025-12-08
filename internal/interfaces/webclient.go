@@ -2,7 +2,6 @@ package interfaces
 
 import (
 	"context"
-	"io"
 	"os"
 
 	"github.com/mimic/internal/core/locking"
@@ -17,9 +16,8 @@ type WebClient interface {
 	ReadDir(name string) ([]os.FileInfo, error)
 
 	// Read helpers
-	Read(name string) ([]byte, error)              // read whole file
-	ReadStream(name string) (io.ReadCloser, error) // streaming read
-	ReadRange(name string, offset, length int64) (io.ReadCloser, error)
+	Read(name string) ([]byte, error) // read whole file
+	ReadRange(name string, offset, length int64) ([]byte, error)
 
 	// Write
 	Write(name string, data []byte) error // write/overwrite with byte slice

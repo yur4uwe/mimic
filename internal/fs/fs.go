@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/mimic/internal/core/cache"
 	"github.com/mimic/internal/core/logger"
 	"github.com/mimic/internal/interfaces"
 	"github.com/winfsp/cgofuse/fuse"
@@ -16,18 +17,20 @@ type FS interface {
 
 type WinfspFS struct {
 	fuse.FileSystemBase
-	client     interfaces.WebClient
-	handles    sync.Map // map[uint64]*FileHandle
-	logger     logger.FullLogger
-	nextHandle uint64
-	host       *fuse.FileSystemHost
-	mpoint     string
+	client      interfaces.WebClient
+	handles     sync.Map // map[uint64]*FileHandle
+	logger      logger.FullLogger
+	nextHandle  uint64
+	host        *fuse.FileSystemHost
+	mpoint      string
+	bufferCache *cache.BufferCache
 }
 
 func New(webdavClient interfaces.WebClient, logger logger.FullLogger) *WinfspFS {
 	return &WinfspFS{
-		client: webdavClient,
-		logger: logger,
+		client:      webdavClient,
+		logger:      logger,
+		bufferCache: cache.NewBufferCache(),
 	}
 }
 

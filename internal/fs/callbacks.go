@@ -40,6 +40,14 @@ func (fs *WinfspFS) Getattr(p string, stat *fuselib.Stat_t, fh uint64) int {
 	if fi, ok := fs.GetHandle(fh); ^uint64(0) != fh && ok {
 		*stat = *fi.stat
 
+		if fi.buffer != nil {
+			bufSize := fi.buffer.Size()
+			bufBase := fi.buffer.BasePos()
+			if bufBase+bufSize > stat.Size {
+				stat.Size = bufBase + bufSize
+			}
+		}
+
 		fs.logger.Logf("[Getattr] found handle path=%s fh=%d mode=%#o size=%d", norm, fh, stat.Mode, stat.Size)
 		return 0
 	}

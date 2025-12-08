@@ -167,6 +167,7 @@ func checkO_WRONLY(fpath string) error {
 		log.Printf("[checkO_WRONLY] open failed after %s: %v", time.Since(start), err)
 		return err
 	}
+	defer f.Close()
 
 	// read should fail
 	if _, err = f.Read(make([]byte, 8)); err == nil {
@@ -184,7 +185,6 @@ func checkO_WRONLY(fpath string) error {
 		log.Printf("Wrote %d bytes, expected 2", n)
 		return err
 	}
-	f.Close()
 
 	b, err := os.ReadFile(fpath)
 	if err != nil {
@@ -211,6 +211,8 @@ func checkO_APPEND(fpath string) error {
 		log.Printf("[checkO_APPEND] open failed after %s: %v", time.Since(start), err)
 		return err
 	}
+	defer f.Close()
+
 	// write should append
 	n, err := f.Write([]byte("A"))
 	if err != nil || n != 1 {
@@ -219,7 +221,6 @@ func checkO_APPEND(fpath string) error {
 
 		return err
 	}
-	f.Close()
 
 	b, err := os.ReadFile(fpath)
 	if err != nil {
@@ -252,6 +253,8 @@ func checkO_TRUNC(fpath string) error {
 		log.Printf("[checkO_TRUNC] open failed after %s: %v", time.Since(start), err)
 		return err
 	}
+	defer f.Close()
+
 	// write after truncation
 	n, err := f.Write([]byte("T"))
 	if err != nil || n != 1 {
@@ -259,7 +262,6 @@ func checkO_TRUNC(fpath string) error {
 		log.Printf("[checkO_TRUNC] write failed after %s: %v", time.Since(start), err)
 		return err
 	}
-	f.Close()
 
 	b, err := os.ReadFile(fpath)
 	if err != nil {
@@ -291,13 +293,13 @@ func checkO_CREATE(fpath string) error {
 		log.Printf("[checkO_CREATE] open failed after %s: %v", time.Since(start), err)
 		return err
 	}
+	defer f.Close()
 	n, err := f.Write([]byte("C"))
 	if err != nil || n != 1 {
 		err = errors.Join(err, errors.New("unexpected write byte count for O_CREATE"))
 		log.Printf("[checkO_CREATE] write failed after %s: %v", time.Since(start), err)
 		return err
 	}
-	f.Close()
 
 	b, err := os.ReadFile(fpath)
 	if err != nil {

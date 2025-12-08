@@ -1,7 +1,6 @@
 package fs
 
 import (
-	"io"
 	"os"
 	"strings"
 
@@ -84,7 +83,7 @@ func (fs *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
 	}
 
 	if err := fs.client.Create(path); err != nil {
-		if os.IsPermission(err) {
+		if os.IsPermission(err) || helpers.IsForbiddenErr(err) {
 			fs.logger.Errorf("[Create]: permission denied for path=%s", path)
 			return -EACCES, 0
 		}
@@ -128,9 +127,12 @@ func (fs *WinfspFS) Flush(path string, file_handle uint64) (errc int) {
 
 	fh.MLock()
 	defer fh.MUnlock()
-	buf, off := fh.Buffer()
+	buf, off := fh.CopyBuffer()
 	fs.logger.Logf("[Flush] about to write path=%s buffer_len=%d buffer_off=%d", fh.Path(), len(buf), off)
 	if err := fs.client.WriteOffset(fh.Path(), buf, off); err != nil {
+		if helpers.IsForbiddenErr(err) {
+			return -EACCES
+		}
 		if helpers.IsNotExistErr(err) && fh.Flags().Create() {
 			end := off + int64(len(buf))
 			if end > int64(^uint(0)>>1) {
@@ -170,6 +172,8 @@ func (fs *WinfspFS) Access(path string, mode uint32) int {
 	if err != nil {
 		if helpers.IsNotExistErr(err) {
 			return -ENOENT
+		} else if helpers.IsForbiddenErr(err) {
+			return -EACCES
 		}
 		fs.logger.Errorf("[Access] Stat error for path=%s: %v", path, err)
 		return -EIO
@@ -179,7 +183,6 @@ func (fs *WinfspFS) Access(path string, mode uint32) int {
 }
 
 func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle uint64) int {
-
 	fh, ok := fs.GetHandle(file_handle)
 	if !ok {
 		fs.logger.Errorf("[Read] invalid file handle=%d for path=%s", file_handle, path)
@@ -191,26 +194,70 @@ func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle u
 		return -EACCES
 	}
 
-	// If no dirty buffer, keep previous simple path
-	fs.logger.Logf("[Read] no dirty buffer path=%s offset=%d len=%d fh=%d", path, offset, len(buffer), file_handle)
-
-	if offset >= fh.stat.Size {
+	// requested window
+	reqStart := offset
+	reqLen := int64(len(buffer))
+	if reqLen == 0 {
 		return 0
 	}
-	toRead := len(buffer)
-	rc, err := fs.client.ReadRange(fh.Path(), offset, int64(toRead))
-	if err != nil {
-		fs.logger.Errorf("[Read] ReadRange error for %s offset=%d len=%d: %v", path, offset, toRead, err)
-		return -EIO
-	}
-	defer rc.Close()
 
-	n, err := io.ReadFull(rc, buffer)
-	if err == io.ErrUnexpectedEOF || err == io.EOF {
+	// Snapshot dirty buffer (copy) and its base offset
+	bufData, bufBase := fh.CopyBuffer()
+
+	// If no dirty buffer, do a simple remote read
+	if !fh.IsDirty() || len(bufData) == 0 {
+		// if we know remote size and request starts beyond it -> EOF
+		if fh.stat != nil && reqStart >= fh.stat.Size {
+			return 0
+		}
+
+		remoteBuf, err := fs.client.ReadRange(fh.Path(), reqStart, reqLen)
+		if err != nil {
+			if helpers.IsNotExistErr(err) {
+				return 0
+			} else if helpers.IsForbiddenErr(err) {
+				return -EACCES
+			}
+			fs.logger.Errorf("[Read] ReadRange error for %s offset=%d len=%d: %v", path, reqStart, reqLen, err)
+			return -EIO
+		}
+
+		// copy up to requested length
+		if int64(len(remoteBuf)) > reqLen {
+			remoteBuf = remoteBuf[:reqLen]
+		}
+		n := copy(buffer, remoteBuf)
 		return n
-	} else if err != nil {
-		fs.logger.Errorf("[Read] ReadFull error for %s offset=%d len=%d: %v", path, offset, toRead, err)
-		return -EIO
 	}
+
+	// We have dirty data: fetch remote range (unless stat proves remote has none)
+	var remoteBuf []byte
+	if fh.stat != nil && reqStart >= fh.stat.Size {
+		remoteBuf = []byte{}
+	} else {
+		rb, err := fs.client.ReadRange(fh.Path(), reqStart, reqLen)
+		if err != nil {
+			if helpers.IsNotExistErr(err) {
+				remoteBuf = []byte{}
+			} else if helpers.IsForbiddenErr(err) {
+				return -EACCES
+			} else {
+				fs.logger.Errorf("[Read] ReadRange error for %s offset=%d len=%d: %v", path, reqStart, reqLen, err)
+				return -EIO
+			}
+		} else {
+			remoteBuf = rb
+			if int64(len(remoteBuf)) > reqLen {
+				remoteBuf = remoteBuf[:reqLen]
+			}
+		}
+	}
+
+	// Merge remote bytes and dirty buffer (buffer overrides remote)
+	merged := helpers.MergeRemoteAndBuffer(remoteBuf, reqStart, bufData, bufBase, reqStart, int(reqLen))
+	if len(merged) == 0 {
+		return 0
+	}
+	n := copy(buffer, merged)
 	return n
 }
