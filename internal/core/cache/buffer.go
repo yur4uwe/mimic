@@ -15,6 +15,7 @@ var (
 // FileBuffer represents a file image kept in memory for a mapped path.
 type FileBuffer struct {
 	mu          sync.RWMutex
+	Mask        Mask
 	Base        int64
 	Data        []byte
 	Dirty       bool
@@ -82,23 +83,31 @@ func (fb *FileBuffer) WriteAt(offset int64, data []byte) error {
 	fb.mu.Lock()
 	defer fb.mu.Unlock()
 
+	// no data yet, create new buffer
 	if len(fb.Data) == 0 {
 		fb.Base = offset
 		fb.Data = make([]byte, len(data))
 		copy(fb.Data, data)
+		fb.Mask = make(Mask, maskSize(len(data)))
+		fb.Mask.setValid(0, len(data))
 		fb.Dirty = true
 		return nil
 	}
 
+	// if offset is within current data range
 	relStart := offset - fb.Base
 
+	// within current data
 	if relStart >= 0 {
+		// calculate end within buffer
 		end := relStart + int64(len(data))
 		if end > int64(len(fb.Data)) {
+			// grow if new end exceeds current size
 			newData := make([]byte, end)
 			copy(newData, fb.Data)
 			fb.Data = newData
 		}
+		fb.Mask.setValid(int(relStart), int(end))
 		copy(fb.Data[relStart:end], data)
 		fb.Dirty = true
 		return nil
@@ -110,9 +119,13 @@ func (fb *FileBuffer) WriteAt(offset int64, data []byte) error {
 	newLen := prepend + int64(len(fb.Data))
 	newData := make([]byte, newLen)
 	// copy incoming data at offset 0
-	copy(newData[0:int64(len(data))], data)
+	copy(newData[0:len(data)], data)
 	// copy existing data after the prepend region
 	copy(newData[prepend:newLen], fb.Data)
+
+	fb.Mask = fb.Mask.shiftedRight(len(fb.Data), int(prepend), len(newData))
+	fb.Mask.setValid(0, len(data))
+
 	fb.Base = offset
 	fb.Data = newData
 	fb.Dirty = true
@@ -123,7 +136,12 @@ func (fb *FileBuffer) Clear() {
 	fb.mu.Lock()
 	fb.Data = nil
 	fb.Dirty = false
+	fb.Mask.clear()
 	fb.mu.Unlock()
+}
+
+func (fb *FileBuffer) IsValidAt(i int) bool {
+	return fb.Mask.isSet(i)
 }
 
 func (fb *FileBuffer) Size() int64 {
@@ -150,48 +168,4 @@ func (fb *FileBuffer) DecHandle() {
 		fb.HandleCount--
 	}
 	fb.mu.Unlock()
-}
-
-// BufferCache stores FileBuffer entries by path.
-type BufferCache struct {
-	entries sync.Map // map[string]*FileBuffer
-}
-
-func NewBufferCache() *BufferCache {
-	return &BufferCache{}
-}
-
-// Get returns the buffer for a path if present.
-func (bc *BufferCache) Get(path string) (*FileBuffer, bool) {
-	value, ok := bc.entries.Load(path)
-	if !ok {
-		return nil, false
-	}
-	buf, ok := value.(*FileBuffer)
-	return buf, ok
-}
-
-// GetOrCreate returns the buffer for a path, creating it if missing.
-func (bc *BufferCache) GetOrCreate(path string) *FileBuffer {
-	if v, ok := bc.entries.Load(path); ok {
-		if fb, ok := v.(*FileBuffer); ok {
-			return fb
-		}
-	}
-
-	fb := &FileBuffer{
-		Data:        make([]byte, 0),
-		HandleCount: 1,
-	}
-	actual, _ := bc.entries.LoadOrStore(path, fb)
-	return actual.(*FileBuffer)
-}
-
-// Set stores the provided buffer for the path (overwrites).
-func (bc *BufferCache) Set(path string, buffer *FileBuffer) {
-	bc.entries.Store(path, buffer)
-}
-
-func (bc *BufferCache) Delete(path string) {
-	bc.entries.Delete(path)
 }

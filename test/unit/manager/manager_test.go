@@ -1,23 +1,25 @@
-package locking
+package locking_test
 
 import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/mimic/internal/core/locking"
 )
 
 func TestAcquireReleaseQuery(t *testing.T) {
-	lm := NewLockManager()
+	lm := locking.NewLockManager()
 	owner1 := []byte("owner1")
 	owner2 := []byte("owner2")
 
 	// owner1 acquires write lock
-	if err := lm.Acquire("file", owner1, 0, 100, F_WRLCK); err != nil {
+	if err := lm.Acquire("file", owner1, 0, 100, locking.F_WRLCK); err != nil {
 		t.Fatalf("Acquire failed: %v", err)
 	}
 
 	// owner2 should be blocked for overlapping write or read when owner1 holds write
-	if err := lm.Acquire("file", owner2, 0, 50, F_RDLCK); err != ErrWouldBlock {
+	if err := lm.Acquire("file", owner2, 0, 50, locking.F_RDLCK); err != locking.ErrWouldBlock {
 		t.Fatalf("expected ErrWouldBlock, got %v", err)
 	}
 
@@ -31,7 +33,7 @@ func TestAcquireReleaseQuery(t *testing.T) {
 	}
 
 	// Release by wrong owner should fail
-	if err := lm.Release("file", owner2, 0, 100); err != ErrNotOwner {
+	if err := lm.Release("file", owner2, 0, 100); err != locking.ErrNotOwner {
 		t.Fatalf("expected ErrNotOwner on release by non-owner, got %v", err)
 	}
 
@@ -41,18 +43,18 @@ func TestAcquireReleaseQuery(t *testing.T) {
 	}
 
 	// after release, owner2 can acquire a read lock
-	if err := lm.Acquire("file", owner2, 0, 100, F_RDLCK); err != nil {
+	if err := lm.Acquire("file", owner2, 0, 100, locking.F_RDLCK); err != nil {
 		t.Fatalf("Acquire after release failed: %v", err)
 	}
 }
 
 func TestAcquireWait(t *testing.T) {
-	lm := NewLockManager()
+	lm := locking.NewLockManager()
 	owner1 := []byte("o1")
 	owner2 := []byte("o2")
 
 	// owner1 acquires a write lock for a long range
-	if err := lm.Acquire("key", owner1, 0, 1000, F_WRLCK); err != nil {
+	if err := lm.Acquire("key", owner1, 0, 1000, locking.F_WRLCK); err != nil {
 		t.Fatalf("Acquire failed: %v", err)
 	}
 
@@ -66,21 +68,21 @@ func TestAcquireWait(t *testing.T) {
 	defer cancel()
 
 	// owner2 should wait and acquire once released
-	if err := lm.AcquireWait(ctx, "key", owner2, 0, 1000, F_WRLCK); err != nil {
+	if err := lm.AcquireWait(ctx, "key", owner2, 0, 1000, locking.F_WRLCK); err != nil {
 		t.Fatalf("AcquireWait failed: %v", err)
 	}
 }
 
 func TestNonOverlappingLocks(t *testing.T) {
-	lm := NewLockManager()
+	lm := locking.NewLockManager()
 	ownerA := []byte("A")
 	ownerB := []byte("B")
 
 	// non-overlapping ranges should allow concurrent locks
-	if err := lm.Acquire("file", ownerA, 0, 10, F_WRLCK); err != nil {
+	if err := lm.Acquire("file", ownerA, 0, 10, locking.F_WRLCK); err != nil {
 		t.Fatalf("Acquire A failed: %v", err)
 	}
-	if err := lm.Acquire("file", ownerB, 20, 30, F_WRLCK); err != nil {
+	if err := lm.Acquire("file", ownerB, 20, 30, locking.F_WRLCK); err != nil {
 		t.Fatalf("Acquire B failed: %v", err)
 	}
 }
