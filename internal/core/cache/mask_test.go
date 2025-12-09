@@ -1,6 +1,9 @@
 package cache
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestMaskEnsureSize(t *testing.T) {
 	var m Mask
@@ -17,7 +20,7 @@ func TestMaskSetValidAndIsSet(t *testing.T) {
 	// set bytes 3..7 (length 5 -> indices 3,4,5,6,7)
 	m.setValid(3, 5)
 
-	cases := map[int]bool{
+	cases := map[int64]bool{
 		2: false,
 		3: true,
 		4: true,
@@ -25,7 +28,7 @@ func TestMaskSetValidAndIsSet(t *testing.T) {
 		8: false,
 	}
 	for idx, exp := range cases {
-		if got := m.isSet(idx); got != exp {
+		if got := m.IsSet(idx); got != exp {
 			t.Fatalf("isSet(%d): expected %v, got %v", idx, exp, got)
 		}
 	}
@@ -34,12 +37,12 @@ func TestMaskSetValidAndIsSet(t *testing.T) {
 func TestMaskClear(t *testing.T) {
 	var m Mask
 	m.setValid(0, 4) // set 0..3
-	if !m.isSet(2) {
+	if !m.IsSet(2) {
 		t.Fatalf("precondition failed: expected bit 2 set")
 	}
 	m.clear()
-	for i := range 8 {
-		if m.isSet(i) {
+	for i := int64(0); i < 8; i++ {
+		if m.IsSet(i) {
 			t.Fatalf("clear: expected bit %d to be unset", i)
 		}
 	}
@@ -51,22 +54,27 @@ func TestMaskShiftedRight(t *testing.T) {
 	m.setValid(0, 2) // indices 0,1
 	m.setValid(5, 1) // index 5
 
-	oldLen := 6
-	shiftBy := 3
+	oldLen := int64(6)
+	shiftBy := int64(3)
 	newLen := oldLen + shiftBy
 	newMask := m.shiftedRight(oldLen, shiftBy, newLen)
 
 	// old 0 -> new 3, old1 -> new4, old5 -> new8
-	expectSet := map[int]bool{
-		3: true,
-		4: true,
-		8: true,
+	expectSet := map[int64]bool{
 		0: false,
 		1: false,
+		2: false,
+		3: true,
+		4: true,
 		5: false,
+		6: false,
+		7: false,
+
+		8: true,
 	}
 	for idx, exp := range expectSet {
-		if got := newMask.isSet(idx); got != exp {
+		if got := newMask.IsSet(idx); got != exp {
+			fmt.Printf("Mask state: %b", newMask)
 			t.Fatalf("shiftedRight: bit %d expected %v got %v", idx, exp, got)
 		}
 	}
@@ -76,9 +84,9 @@ func TestMaskSetValidCrossByteBoundary(t *testing.T) {
 	var m Mask
 	// set a range that crosses a mask byte boundary, e.g., start=6 length=6 -> indices 6..11
 	m.setValid(6, 6)
-	for i := range 12 {
+	for i := int64(0); i < 12; i++ {
 		expect := (i >= 6 && i < 12)
-		if got := m.isSet(i); got != expect {
+		if got := m.IsSet(i); got != expect {
 			t.Fatalf("cross-boundary setValid: index %d expected %v got %v", i, expect, got)
 		}
 	}

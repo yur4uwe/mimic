@@ -14,7 +14,7 @@ func TestFileBuffer_WriteAppendRead(t *testing.T) {
 		t.Fatalf("WriteAt(4,A) failed: %v", err)
 	}
 
-	cp, base := fb.CopyBuffer()
+	cp, base, _ := fb.CopyBuffer()
 	if base != 0 {
 		t.Fatalf("CopyBuffer base: want 0 got %d", base)
 	}
@@ -23,7 +23,7 @@ func TestFileBuffer_WriteAppendRead(t *testing.T) {
 	}
 
 	// Validate mask bits
-	for i := 0; i < 5; i++ {
+	for i := int64(0); i < 5; i++ {
 		if !fb.IsValidAt(i) {
 			t.Fatalf("expected valid bit at %d", i)
 		}
@@ -57,7 +57,7 @@ func TestFileBuffer_PrependBehavior(t *testing.T) {
 		t.Fatalf("prepend WriteAt failed: %v", err)
 	}
 
-	cp, base := fb.CopyBuffer()
+	cp, base, _ := fb.CopyBuffer()
 	if base != 0 {
 		t.Fatalf("after prepend base: want 0 got %d", base)
 	}
@@ -66,7 +66,7 @@ func TestFileBuffer_PrependBehavior(t *testing.T) {
 	}
 
 	// mask: indices 0..4 should be valid (0..3 from BASE, 4 from X)
-	for i := 0; i <= 4; i++ {
+	for i := int64(0); i <= 4; i++ {
 		if !fb.IsValidAt(i) {
 			t.Fatalf("expected valid bit at %d after prepend", i)
 		}
@@ -83,12 +83,12 @@ func TestFileBuffer_OverwriteWithin(t *testing.T) {
 	if err := fb.WriteAt(1, []byte("i")); err != nil {
 		t.Fatalf("WriteAt overwrite failed: %v", err)
 	}
-	cp, _ := fb.CopyBuffer()
+	cp, _, _ := fb.CopyBuffer()
 	if string(cp) != "HiLLO" {
 		t.Fatalf("overwrite result: want %q got %q", "HiLLO", string(cp))
 	}
 	// mask should mark first 5 bytes valid
-	for i := 0; i < 5; i++ {
+	for i := int64(0); i < 5; i++ {
 		if !fb.IsValidAt(i) {
 			t.Fatalf("expected valid bit at %d after overwrite", i)
 		}
@@ -106,7 +106,7 @@ func TestFileBuffer_PartialMaskGap(t *testing.T) {
 		t.Fatalf("WriteAt(7,B) failed: %v", err)
 	}
 
-	cp, base := fb.CopyBuffer()
+	cp, base, _ := fb.CopyBuffer()
 	if base != 5 {
 		t.Fatalf("sparse base: want 5 got %d", base)
 	}
@@ -140,7 +140,7 @@ func TestFileBuffer_ClearAndBounds(t *testing.T) {
 	if fb.IsValidAt(0) {
 		t.Fatalf("after Clear expected no valid bits")
 	}
-	if buf, _ := fb.CopyBuffer(); buf != nil {
+	if buf, _, _ := fb.CopyBuffer(); buf != nil {
 		t.Fatalf("after Clear expected nil buffer copy, got len %d", len(buf))
 	}
 }

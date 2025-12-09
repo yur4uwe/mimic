@@ -28,15 +28,15 @@ func (fb *FileBuffer) BasePos() int64 {
 	return fb.Base
 }
 
-func (fb *FileBuffer) CopyBuffer() ([]byte, int64) {
+func (fb *FileBuffer) CopyBuffer() ([]byte, int64, Mask) {
 	fb.mu.RLock()
 	defer fb.mu.RUnlock()
 	if len(fb.Data) == 0 {
-		return nil, fb.Base
+		return nil, fb.Base, nil
 	}
 	cp := make([]byte, len(fb.Data))
 	copy(cp, fb.Data)
-	return cp, fb.Base
+	return cp, fb.Base, fb.Mask
 }
 
 func (fb *FileBuffer) SetBase(b int64) {
@@ -88,8 +88,8 @@ func (fb *FileBuffer) WriteAt(offset int64, data []byte) error {
 		fb.Base = offset
 		fb.Data = make([]byte, len(data))
 		copy(fb.Data, data)
-		fb.Mask = make(Mask, maskSize(len(data)))
-		fb.Mask.setValid(0, len(data))
+		fb.Mask = make(Mask, maskSize(int64(len(data))))
+		fb.Mask.setValid(0, int64(len(data)))
 		fb.Dirty = true
 		return nil
 	}
@@ -107,7 +107,7 @@ func (fb *FileBuffer) WriteAt(offset int64, data []byte) error {
 			copy(newData, fb.Data)
 			fb.Data = newData
 		}
-		fb.Mask.setValid(int(relStart), int(end))
+		fb.Mask.setValid(relStart, end)
 		copy(fb.Data[relStart:end], data)
 		fb.Dirty = true
 		return nil
@@ -123,8 +123,8 @@ func (fb *FileBuffer) WriteAt(offset int64, data []byte) error {
 	// copy existing data after the prepend region
 	copy(newData[prepend:newLen], fb.Data)
 
-	fb.Mask = fb.Mask.shiftedRight(len(fb.Data), int(prepend), len(newData))
-	fb.Mask.setValid(0, len(data))
+	fb.Mask = fb.Mask.shiftedRight(int64(len(fb.Data)), prepend, int64(len(newData)))
+	fb.Mask.setValid(0, int64(len(data)))
 
 	fb.Base = offset
 	fb.Data = newData
@@ -140,8 +140,8 @@ func (fb *FileBuffer) Clear() {
 	fb.mu.Unlock()
 }
 
-func (fb *FileBuffer) IsValidAt(i int) bool {
-	return fb.Mask.isSet(i)
+func (fb *FileBuffer) IsValidAt(i int64) bool {
+	return fb.Mask.IsSet(i)
 }
 
 func (fb *FileBuffer) Size() int64 {

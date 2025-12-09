@@ -77,7 +77,7 @@ func (fs *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle 
 	}
 	file.MUnlock()
 
-	bufCopy, bufBase := file.CopyBuffer()
+	bufCopy, bufBase, _ := file.CopyBuffer()
 	fs.logger.Logf("[Write] buffer after write path=%s base=%d len=%d dirty=%v", path, bufBase, len(bufCopy), file.IsDirty())
 
 	return len(buffer)
@@ -135,7 +135,7 @@ func (fs *WinfspFS) Flush(path string, file_handle uint64) (errc int) {
 
 	fh.MLock()
 	defer fh.MUnlock()
-	buf, off := fh.CopyBuffer()
+	buf, off, _ := fh.CopyBuffer()
 	fs.logger.Logf("[Flush] about to write path=%s buffer_len=%d buffer_off=%d", fh.Path(), len(buf), off)
 	if err := fs.client.WriteOffset(fh.Path(), buf, off); err != nil {
 		if helpers.IsForbiddenErr(err) {
@@ -211,7 +211,7 @@ func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle u
 	}
 
 	// Snapshot dirty buffer (copy) and its base offset
-	bufData, bufBase := fh.CopyBuffer()
+	bufData, bufBase, bufMask := fh.CopyBuffer()
 
 	// If no dirty buffer, do a simple remote read
 	if !fh.IsDirty() || len(bufData) == 0 {
@@ -266,7 +266,7 @@ func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle u
 	}
 
 	// Merge remote bytes and dirty buffer (buffer overrides remote)
-	merged := helpers.MergeRemoteAndBuffer(remoteBuf, reqStart, bufData, bufBase, reqStart, int(reqLen))
+	merged := helpers.MergeRemoteAndBuffer(remoteBuf, reqStart, bufData, bufBase, bufMask, reqStart, int(reqLen))
 	fs.logger.Logf("[Read] merged buffer for %s offset=%d len=%d remote_len=%d buf_len=%d merged_len=%d", path, reqStart, reqLen, len(remoteBuf), len(bufData), len(merged))
 	if len(merged) == 0 {
 		return 0

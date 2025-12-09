@@ -58,9 +58,9 @@ func (fh *FileHandle) ClearBuffer() {
 }
 
 // nil, 0 if no buffer
-func (fh *FileHandle) CopyBuffer() ([]byte, int64) {
+func (fh *FileHandle) CopyBuffer() ([]byte, int64, cache.Mask) {
 	if fh.buffer == nil {
-		return nil, 0
+		return nil, 0, nil
 	}
 	return fh.buffer.CopyBuffer()
 }
