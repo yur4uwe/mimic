@@ -81,21 +81,77 @@ function Add-ToSystemPath {
   Write-Host "Added $Dir to system PATH (new shells only)."
 }
 
+function Install-WinFSP {
+  if (Test-WinFspInstalled) { return $true }
+
+  $apiUrl = "https://api.github.com/repos/billziss-gh/winfsp/releases/latest"
+
+  try {
+    $rel = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing -ErrorAction Stop
+  }
+  catch {
+    Write-Error "Failed to query WinFsp releases: $_"
+    return $false
+  }
+
+  $asset = $rel.assets | Where-Object { $_.name -match "(?i)winfsp.*\.msi$" } | Select-Object -First 1
+  if (-not $asset) {
+    Write-Error "No suitable WinFsp MSI found in latest release. See: $($rel.html_url)"
+    return $false
+  }
+
+  $msiUrl = $asset.browser_download_url
+  $tmp = Join-Path $env:TEMP ("winfsp-install-$([guid]::NewGuid()).msi")
+
+  Write-Host "Downloading WinFsp MSI..."
+  try {
+    Invoke-WebRequest -Uri $msiUrl -OutFile $tmp -UseBasicParsing -ErrorAction Stop
+  }
+  catch {
+    Write-Error "Download failed: $_"
+    return $false
+  }
+
+  try {
+    $hash = Get-FileHash -Algorithm SHA256 -Path $tmp
+    Write-Host "MSI path: $tmp"
+    Write-Host "SHA256: $($hash.Hash)"
+  }
+  catch {
+    Write-Warning "Could not compute hash of ${tmp}: $_"
+  }
+
+  Write-Host "Installing WinFsp MSI silently (msiexec) ..."
+  $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i", $tmp, "/qn", "/norestart" -Wait -PassThru
+  $exit = $proc.ExitCode
+
+  Remove-Item -Force $tmp -ErrorAction SilentlyContinue
+
+  if ($exit -ne 0) {
+    Write-Error "msiexec failed with exit code $exit"
+    return $false
+  }
+
+  if (Test-WinFspInstalled) {
+    Write-Host "WinFsp installed successfully."
+    return $true
+  }
+  else {
+    Write-Error "WinFsp install finished but runtime not detected. You may need to reboot."
+    return $false
+  }
+}
+
 if (-not (Test-Admin)) {
   Write-Host "Elevation required. Restarting elevated..."
 
   $scriptFile = $PSCommandPath
   if (-not $scriptFile) { $scriptFile = $MyInvocation.MyCommand.Path }
 
-  Start-Process powershell `
-    -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptFile`"" `
-    -Verb RunAs -Wait
-
+  $arg = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $scriptFile)
+  Start-Process -FilePath "powershell" -ArgumentList $arg -Verb RunAs -Wait
   exit
 }
-
-$arch = Get-ArchSuffix
-Write-Host "Detected OS architecture: $arch"
 
 $bundleRoot = $PSScriptRoot
 Write-Host "Bundle root: $bundleRoot"
@@ -207,9 +263,12 @@ $cfgContent | Out-File -FilePath $sysCfg -Encoding UTF8 -Force
 Write-Host "Wrote config to $sysCfg"
 
 if (-not (Test-WinFspInstalled)) {
-  Write-Host "WinFsp not found. Please install it manually:"
-  Write-Host "https://github.com/billziss-gh/winfsp/releases"
-  exit 2
+  Write-Host "WinFsp not found - attempting automatic install..."
+  if (-not (Install-WinFSP)) {
+    Write-Host "Automatic WinFsp install failed. Please install manually: https://github.com/winfsp/winfsp/releases"
+    Read-Host -Prompt "Press Enter to exit"
+    exit 2
+  }
 }
 
 Add-ToSystemPath -Dir $installDir
@@ -220,3 +279,4 @@ Write-Host "Open a NEW terminal and run:"
 Write-Host "  mimic --help"
 Write-Host "Default mount point: X:"
 Write-Host "Install dir: $installDir"
+Read-Host -Prompt "Press Enter to exit"
