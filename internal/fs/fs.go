@@ -15,7 +15,7 @@ type FS interface {
 	Unmount() error
 }
 
-type WinfspFS struct {
+type FuseFS struct {
 	fuse.FileSystemBase
 	client      interfaces.WebClient
 	handles     sync.Map // map[uint64]*FileHandle
@@ -26,31 +26,31 @@ type WinfspFS struct {
 	bufferCache *cache.BufferCache
 }
 
-func New(webdavClient interfaces.WebClient, logger logger.FullLogger) *WinfspFS {
-	return &WinfspFS{
+func New(webdavClient interfaces.WebClient, logger logger.FullLogger) *FuseFS {
+	return &FuseFS{
 		client:      webdavClient,
 		logger:      logger,
 		bufferCache: cache.NewBufferCache(),
 	}
 }
 
-func (fs *WinfspFS) Mount(mountpoint string, flags []string) error {
-	fs.logger.Logf("Mounting WinFSP filesystem at %s with flags: %v", mountpoint, flags)
+func (fs *FuseFS) Mount(mountpoint string, flags []string) error {
+	fs.logger.Logf("Mounting FUSE filesystem at %s with flags: %v", mountpoint, flags)
 	fs.mpoint = mountpoint
 	fs.host = fuse.NewFileSystemHost(fs)
 	if !fs.host.Mount(fs.mpoint, flags) {
-		fs.logger.Error("Failed to mount WinFSP filesystem")
-		return fmt.Errorf("failed to mount WinFSP filesystem")
+		fs.logger.Error("Failed to mount FUSE filesystem")
+		return fmt.Errorf("failed to mount FUSE filesystem")
 	}
 
 	return nil
 }
 
-func (fs *WinfspFS) Unmount() error {
-	fs.logger.Log("Unmounting WinFSP filesystem")
+func (fs *FuseFS) Unmount() error {
+	fs.logger.Log("Unmounting FUSE filesystem")
 	if ok := fs.host.Unmount(); !ok {
-		fs.logger.Error("Failed to unmount WinFSP filesystem")
-		return fmt.Errorf("failed to unmount winfsp filesystem")
+		fs.logger.Error("Failed to unmount FUSE filesystem")
+		return fmt.Errorf("failed to unmount FUSE filesystem")
 	}
 
 	return nil

@@ -9,7 +9,7 @@ import (
 	"github.com/winfsp/cgofuse/fuse"
 )
 
-func (fs *WinfspFS) Opendir(path string) (int, uint64) {
+func (fs *FuseFS) Opendir(path string) (int, uint64) {
 	fs.logger.Logf("[Opendir] path=%s", path)
 
 	f, err := fs.client.Stat(path)
@@ -26,13 +26,13 @@ func (fs *WinfspFS) Opendir(path string) (int, uint64) {
 	return 0, handle
 }
 
-func (fs *WinfspFS) Releasedir(path string, fh uint64) int {
+func (fs *FuseFS) Releasedir(path string, fh uint64) int {
 	fs.logger.Logf("[Releasedir] path=%s fh=%d", path, fh)
 	fs.handles.Delete(fh)
 	return 0
 }
 
-func (fs *WinfspFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int64) bool, off int64, fh uint64) int {
+func (fs *FuseFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int64) bool, off int64, fh uint64) int {
 	fs.logger.Logf("[Readdir] path=%s offset=%d fh=%d", filepath, off, fh)
 
 	fill(".", nil, 0)
@@ -60,7 +60,7 @@ func (fs *WinfspFS) Readdir(filepath string, fill func(string, *fuse.Stat_t, int
 	return 0
 }
 
-func (fs *WinfspFS) Mkdir(p string, mode uint32) int {
+func (fs *FuseFS) Mkdir(p string, mode uint32) int {
 	fs.logger.Logf("[Mkdir] path=%s mode=%#o", p, mode)
 	s, err := casters.NormalizePath(p)
 	if err != nil {
@@ -77,7 +77,7 @@ func (fs *WinfspFS) Mkdir(p string, mode uint32) int {
 	return 0
 }
 
-func (fs *WinfspFS) Rmdir(path string) int {
+func (fs *FuseFS) Rmdir(path string) int {
 	fs.logger.Logf("[Rmdir] path=%s", path)
 
 	err := fs.client.Rmdir(path)

@@ -77,7 +77,7 @@ func (fh *FileHandle) Path() string {
 	return fh.path
 }
 
-func (fs *WinfspFS) NewHandle(path string, stat *fuselib.Stat_t, oflags uint32) uint64 {
+func (fs *FuseFS) NewHandle(path string, stat *fuselib.Stat_t, oflags uint32) uint64 {
 	file_handle := atomic.AddUint64(&fs.nextHandle, 1)
 	fh := NewFilehandle(path, flags.OpenFlag(oflags), stat)
 
@@ -89,7 +89,7 @@ func (fs *WinfspFS) NewHandle(path string, stat *fuselib.Stat_t, oflags uint32) 
 	return file_handle
 }
 
-func (fs *WinfspFS) GetHandle(handle uint64) (*FileHandle, bool) {
+func (fs *FuseFS) GetHandle(handle uint64) (*FileHandle, bool) {
 	file, ok := fs.handles.Load(handle)
 	if !ok {
 		return nil, false

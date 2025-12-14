@@ -8,7 +8,7 @@ import (
 	"github.com/mimic/internal/core/helpers"
 )
 
-func (fs *WinfspFS) Truncate(p string, size int64, fh uint64) int {
+func (fs *FuseFS) Truncate(p string, size int64, fh uint64) int {
 	fs.logger.Logf("[Truncate]: path=%s fh=%d size=%d", p, fh, size)
 
 	if strings.HasSuffix(p, "/") && p != "/" {
@@ -36,7 +36,7 @@ func (fs *WinfspFS) Truncate(p string, size int64, fh uint64) int {
 	return 0
 }
 
-func (fs *WinfspFS) Unlink(p string) int {
+func (fs *FuseFS) Unlink(p string) int {
 	fs.logger.Logf("[Unlink]: path=%s", p)
 	if strings.HasSuffix(p, "/") && p != "/" {
 		p = strings.TrimSuffix(p, "/")
@@ -54,7 +54,7 @@ func (fs *WinfspFS) Unlink(p string) int {
 	return 0
 }
 
-func (fs *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle uint64) int {
+func (fs *FuseFS) Write(path string, buffer []byte, offset int64, file_handle uint64) int {
 
 	file, ok := fs.GetHandle(file_handle)
 	if !ok {
@@ -83,7 +83,7 @@ func (fs *WinfspFS) Write(path string, buffer []byte, offset int64, file_handle 
 	return len(buffer)
 }
 
-func (fs *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
+func (fs *FuseFS) Create(path string, flags int, mode uint32) (int, uint64) {
 	fs.logger.Logf("[Create]: path=%s flags=%#o mode=%#o", path, flags, mode)
 
 	if strings.HasSuffix(path, "/") && path != "/" {
@@ -109,13 +109,13 @@ func (fs *WinfspFS) Create(path string, flags int, mode uint32) (int, uint64) {
 }
 
 // Release should flush buffered segments (if any) to remote before closing.
-func (fs *WinfspFS) Release(path string, file_handle uint64) (errc int) {
+func (fs *FuseFS) Release(path string, file_handle uint64) (errc int) {
 	fs.logger.Logf("[Release] path=%s handle=%d", path, file_handle)
 	defer fs.handles.Delete(file_handle)
 	return fs.Flush(path, file_handle)
 }
 
-func (fs *WinfspFS) Flush(path string, file_handle uint64) (errc int) {
+func (fs *FuseFS) Flush(path string, file_handle uint64) (errc int) {
 	fs.logger.Logf("[Flush]: path=%s fh=%d", path, file_handle)
 	fh, ok := fs.GetHandle(file_handle)
 	if !ok {
@@ -163,12 +163,12 @@ func (fs *WinfspFS) Flush(path string, file_handle uint64) (errc int) {
 	return 0
 }
 
-func (fs *WinfspFS) Fsync(path string, datasync bool, file_handle uint64) (errc int) {
+func (fs *FuseFS) Fsync(path string, datasync bool, file_handle uint64) (errc int) {
 	fs.logger.Logf("[Fsync]: path=%s fh=%d datasync=%v", path, file_handle, datasync)
 	return 0
 }
 
-func (fs *WinfspFS) Access(path string, mode uint32) int {
+func (fs *FuseFS) Access(path string, mode uint32) int {
 	fs.logger.Logf("[Access]: path=%s mode=%#o", path, mode)
 	norm, err := casters.NormalizePath(path)
 	if err != nil {
@@ -190,7 +190,7 @@ func (fs *WinfspFS) Access(path string, mode uint32) int {
 	return 0
 }
 
-func (fs *WinfspFS) Read(path string, buffer []byte, offset int64, file_handle uint64) int {
+func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uint64) int {
 
 	fh, ok := fs.GetHandle(file_handle)
 	if !ok {

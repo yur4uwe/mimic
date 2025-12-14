@@ -4,9 +4,21 @@ set -euo pipefail
 TIMESTAMP() { date +"%Y%m%d%H%M%S"; }
 
 if [ "$(id -u)" -ne 0 ]; then
-  echo "This script needs root privileges. Re-running with sudo..."
+  echo "This script needs root privileges to install the binary. Re-running with sudo..."
   exec sudo bash "$0" "$@"
 fi
+
+REAL_USER="${SUDO_USER:-$USER}"
+REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6 || true)
+if [ -z "$REAL_HOME" ]; then
+  if [ "$REAL_USER" = "root" ]; then
+    REAL_HOME="/root"
+  else
+    REAL_HOME="/home/$REAL_USER"
+  fi
+fi
+
+echo "Installing as root, but configuring for user: $REAL_USER ($REAL_HOME)"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_BIN="$SCRIPT_DIR/mimic"
@@ -21,24 +33,13 @@ if [ ! -f "$SRC_CONFIG" ]; then
 fi
 
 DEFAULT_BIN_DIR="/usr/local/bin"
-DEFAULT_CONFIG_DIR="/etc/mimic"
-DEFAULT_RUN_USER="root"
-
 BIN_DIR="${BIN_DIR:-$DEFAULT_BIN_DIR}"
 INSTALL_BIN_PATH="${INSTALL_BIN_PATH:-$BIN_DIR/mimic}"
 
 if [ -n "${CONFIG_DIR:-}" ]; then
   CONFIG_DIR="$CONFIG_DIR"
 else
-  if [ "$(id -u)" -eq 0 ]; then
-    CONFIG_DIR="$DEFAULT_CONFIG_DIR"
-  else
-    if [ -n "${XDG_CONFIG_HOME:-}" ]; then
-      CONFIG_DIR="${XDG_CONFIG_HOME}/mimic"
-    else
-      CONFIG_DIR="${HOME}/.config/mimic"
-    fi
-  fi
+  CONFIG_DIR="${REAL_HOME}/.config/mimic"
 fi
 INSTALL_CONFIG_FILE="${INSTALL_CONFIG_FILE:-$CONFIG_DIR/config.toml}"
 
@@ -53,6 +54,38 @@ DEF_ERR="stderr"
 DEF_STD="stdout"
 
 mkdir -p "$BIN_DIR"
+install_libfuse() {
+  if command -v fusermount >/dev/null 2>&1 || command -v fusermount3 >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "libfuse not found; attempting to install libfuse-dev only..."
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update
+    apt-get install -y libfuse-dev || true
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y libfuse-dev || true
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y libfuse-dev || true
+  elif command -v pacman >/dev/null 2>&1; then
+    pacman -Sy --noconfirm libfuse-dev || true
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache libfuse-dev || true
+  elif command -v brew >/dev/null 2>&1; then
+    brew install libfuse-dev || true
+  else
+    echo "Could not detect package manager. Please install libfuse-dev manually."
+    return 1
+  fi
+
+  if command -v fusermount >/dev/null 2>&1 || command -v fusermount3 >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+if ! install_libfuse; then
+  echo "Warning: FUSE not installed. You may need to install FUSE 2 manually."
+fi
 
 if [ -f "$INSTALL_BIN_PATH" ]; then
   bk="$INSTALL_BIN_PATH.bak.$(TIMESTAMP)"
@@ -65,6 +98,12 @@ install -m 0755 "$SRC_BIN" "$INSTALL_BIN_PATH"
 chmod +x "$INSTALL_BIN_PATH"
 
 mkdir -p "$CONFIG_DIR"
+if chown "$REAL_USER":"$REAL_USER" "$CONFIG_DIR" 2>/dev/null; then
+  :
+else
+  chown "$REAL_USER" "$CONFIG_DIR" 2>/dev/null || true
+fi
+
 if [ -f "$INSTALL_CONFIG_FILE" ]; then
   bk="$INSTALL_CONFIG_FILE.bak.$(TIMESTAMP)"
   echo "Backing up existing config to $bk"
@@ -126,11 +165,21 @@ std = "$std"
 EOF
 
   chmod 0640 "$INSTALL_CONFIG_FILE"
+  if chown "$REAL_USER":"$REAL_USER" "$INSTALL_CONFIG_FILE" 2>/dev/null; then
+    :
+  else
+    chown "$REAL_USER" "$INSTALL_CONFIG_FILE" 2>/dev/null || true
+  fi
   echo "Wrote configuration to $INSTALL_CONFIG_FILE"
 else
   if [ -f "$SRC_CONFIG" ]; then
     echo "Installing example config..."
     install -m 0644 "$SRC_CONFIG" "$INSTALL_CONFIG_FILE"
+    if chown "$REAL_USER":"$REAL_USER" "$INSTALL_CONFIG_FILE" 2>/dev/null; then
+      :
+    else
+      chown "$REAL_USER" "$INSTALL_CONFIG_FILE" 2>/dev/null || true
+    fi
   else
     echo "Creating default config file at $INSTALL_CONFIG_FILE"
     cat >"$INSTALL_CONFIG_FILE" <<EOF
@@ -142,9 +191,14 @@ ttl = "$DEF_TTL"
 max-entries = $DEF_MAX_ENTRIES
 verbose = $DEF_VERBOSE
 err = "$DEF_ERR"
-std = "$DEF_STD"
+std = $DEF_STD
 EOF
     chmod 0640 "$INSTALL_CONFIG_FILE"
+    if chown "$REAL_USER":"$REAL_USER" "$INSTALL_CONFIG_FILE" 2>/dev/null; then
+      :
+    else
+      chown "$REAL_USER" "$INSTALL_CONFIG_FILE" 2>/dev/null || true
+    fi
   fi
   echo "Note: server must use Basic Auth (username/password)."
 fi

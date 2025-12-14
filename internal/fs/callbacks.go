@@ -15,7 +15,7 @@ const (
 	READ_LEN           = 1024 * 1024
 )
 
-func (fs *WinfspFS) Getattr(p string, stat *fuselib.Stat_t, fh uint64) int {
+func (fs *FuseFS) Getattr(p string, stat *fuselib.Stat_t, fh uint64) int {
 	if p == "/" {
 		stat.Mode = fuselib.S_IFDIR | 0o777
 		stat.Nlink = 2
@@ -80,7 +80,7 @@ func (fs *WinfspFS) Getattr(p string, stat *fuselib.Stat_t, fh uint64) int {
 	return 0
 }
 
-func (fs *WinfspFS) Open(path string, oflags int) (int, uint64) {
+func (fs *FuseFS) Open(path string, oflags int) (int, uint64) {
 	flags := flags.OpenFlag(uint32(oflags))
 
 	fi, err := fs.client.Stat(path)
@@ -108,7 +108,7 @@ func (fs *WinfspFS) Open(path string, oflags int) (int, uint64) {
 	return 0, handle
 }
 
-func (fs *WinfspFS) Rename(oldPath string, newPath string) int {
+func (fs *FuseFS) Rename(oldPath string, newPath string) int {
 	fs.logger.Logf("[Rename] from=%s to=%s", oldPath, newPath)
 
 	err := fs.client.Rename(oldPath, newPath)
@@ -120,13 +120,13 @@ func (fs *WinfspFS) Rename(oldPath string, newPath string) int {
 	return 0
 }
 
-func (fs *WinfspFS) Utimens(path string, times []fuselib.Timespec) int {
+func (fs *FuseFS) Utimens(path string, times []fuselib.Timespec) int {
 	fs.logger.Logf("[Utimens] path=%s times=%#v", path, times)
 	// no direct support for setting times in WebDAV; ignore for now
 	return 0
 }
 
-func (fs *WinfspFS) Statfs(path string, stat *fuselib.Statfs_t) int {
+func (fs *FuseFS) Statfs(path string, stat *fuselib.Statfs_t) int {
 	fs.logger.Logf("[Statfs] path=%s", path)
 
 	stat.Bsize = DEFAULT_BLOCK_SIZE
@@ -142,65 +142,65 @@ func (fs *WinfspFS) Statfs(path string, stat *fuselib.Statfs_t) int {
 	return 0
 }
 
-func (fs *WinfspFS) Chmod(path string, mode uint32) int {
+func (fs *FuseFS) Chmod(path string, mode uint32) int {
 	fs.logger.Logf("[Chmod] path=%s mode=%#o", path, mode)
 	return -ENOSYS
 }
 
-func (fs *WinfspFS) Chown(path string, uid uint32, gid uint32) int {
+func (fs *FuseFS) Chown(path string, uid uint32, gid uint32) int {
 	fs.logger.Logf("[Chown] path=%s uid=%d gid=%d", path, uid, gid)
 	return -ENOSYS
 }
 
-func (fs *WinfspFS) Destroy() {
+func (fs *FuseFS) Destroy() {
 	fs.logger.Logf("[Destroy] called")
 }
 
-func (fs *WinfspFS) Fsyncdir(path string, datasync bool, fh uint64) int {
+func (fs *FuseFS) Fsyncdir(path string, datasync bool, fh uint64) int {
 	fs.logger.Logf("[Fsyncdir] path=%s datasync=%v fh=%d", path, datasync, fh)
 	return -ENOSYS
 }
 
-func (fs *WinfspFS) Getxattr(path string, name string) (int, []byte) {
+func (fs *FuseFS) Getxattr(path string, name string) (int, []byte) {
 	fs.logger.Logf("[Getxattr] path=%s name=%s", path, name)
 	return -ENOSYS, nil
 }
 
-func (fs *WinfspFS) Init() {
+func (fs *FuseFS) Init() {
 	fs.logger.Logf("[Init] called")
 }
 
-func (fs *WinfspFS) Link(oldpath string, newpath string) int {
+func (fs *FuseFS) Link(oldpath string, newpath string) int {
 	fs.logger.Logf("[Link] oldpath=%s newpath=%s", oldpath, newpath)
 	return -ENOSYS
 }
 
-func (fs *WinfspFS) Listxattr(path string, fill func(name string) bool) int {
+func (fs *FuseFS) Listxattr(path string, fill func(name string) bool) int {
 	fs.logger.Logf("[Listxattr] path=%s", path)
 	return -ENOSYS
 }
 
-func (fs *WinfspFS) Mknod(path string, mode uint32, dev uint64) int {
+func (fs *FuseFS) Mknod(path string, mode uint32, dev uint64) int {
 	fs.logger.Logf("[Mknod] path=%s mode=%#o dev=%d", path, mode, dev)
 	return -ENOSYS
 }
 
-func (fs *WinfspFS) Readlink(path string) (int, string) {
+func (fs *FuseFS) Readlink(path string) (int, string) {
 	fs.logger.Logf("[Readlink] path=%s", path)
 	return -ENOSYS, ""
 }
 
-func (fs *WinfspFS) Removexattr(path string, name string) int {
+func (fs *FuseFS) Removexattr(path string, name string) int {
 	fs.logger.Logf("[Removexattr] path=%s name=%s", path, name)
 	return -ENOSYS
 }
 
-func (fs *WinfspFS) Setxattr(path string, name string, value []byte, flags int) int {
+func (fs *FuseFS) Setxattr(path string, name string, value []byte, flags int) int {
 	fs.logger.Logf("[Setxattr] path=%s name=%s flags=%d", path, name, flags)
 	return -ENOSYS
 }
 
-func (fs *WinfspFS) Symlink(target string, newpath string) int {
+func (fs *FuseFS) Symlink(target string, newpath string) int {
 	fs.logger.Logf("[Symlink] target=%s newpath=%s", target, newpath)
 	return -ENOSYS
 }

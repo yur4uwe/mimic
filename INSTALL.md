@@ -6,7 +6,7 @@
 
 ### What does the script do?
 On Windows
-1. Installs [WinFSP]() on which it depends
+1. Installs [WinFSP](https://github.com/winfsp/winfsp) on which it depends
 2. Adds the binary location to path 
 3. Puts config inside %APPDATA%\mimic folder
 
