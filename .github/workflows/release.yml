@@ -4,7 +4,8 @@ on:
   push:
     tags:
       - 'v*.*.*'
-
+permissions:
+  contents: write
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -15,9 +16,10 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: '1.23.4'
-      - name: Install goreleaser
-        run: curl -sSfL https://goreleaser.com/static/goreleaser | bash
       - name: Run goreleaser
+        uses: goreleaser/goreleaser-action@v2
+        with:
+          version: latest
+          args: release --rm-dist
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: goreleaser release --rm-dist
+          GITHUB_TOKEN: ${{ secrets.MIMIC_RELEASE_TOKEN }}

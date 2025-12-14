@@ -25,9 +25,8 @@ archives:
     files:
       - example-config.toml
       - scripts/install.sh
-      - scripts/systemd/mimic.service
       - README.md
-      - LICENSE
+      - LICENSE.md
     wrap_in_directory: true
     name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}-{{ .Version }}"
 
@@ -38,7 +37,7 @@ archives:
       - example-config.toml
       - scripts/install.ps1
       - README.md
-      - LICENSE
+      - LICENSE.md
     wrap_in_directory: true
     name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}-{{ .Version }}"
 
