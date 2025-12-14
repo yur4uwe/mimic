@@ -24,7 +24,6 @@ jobs:
       - name: Install build deps
         run: |
           sudo apt-get update
-          # install both libfuse (v2) and libfuse3 dev packages to satisfy headers
           sudo apt-get install -y pkg-config build-essential libfuse-dev libfuse3-dev
 
       - name: Set env variables
