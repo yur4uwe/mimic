@@ -25,8 +25,11 @@ function Test-WinFspInstalled {
   return $false
 }
 
-function Escape-Toml($s) {
-  return ($s -replace '\\','\\\\' -replace '"','\"' -replace "`n","\n")
+function ConvertTo-TomlString {
+  param(
+    [string]$s
+  )
+  return ($s -replace '\\', '\\\\' -replace '"', '\"' -replace "`n", "\n")
 }
 
 function Get-ArchSuffix {
@@ -41,9 +44,9 @@ function Get-UserConfigPath {
 
   $base = $env:APPDATA
   if (-not $base) {
-    $home = $env:USERPROFILE
-    if (-not $home) { return $null }
-    $base = Join-Path $home "AppData\Roaming"
+    $HomeDir = $env:USERPROFILE
+    if (-not $HomeDir) { return $null }
+    $base = Join-Path $HomeDir "AppData\Roaming"
   }
 
   $dir = Join-Path $base $AppName
@@ -125,24 +128,24 @@ if (-not $userCfg) {
   Write-Warning "Per-user config path unavailable"
 }
 
-$DEF_MPOINT      = "X:"
-$DEF_URL         = "https://webdav.example.com"
-$DEF_USERNAME    = "user"
-$DEF_PASSWORD    = "pass"
-$DEF_TTL         = "5s"
+$DEF_MPOINT = "X:"
+$DEF_URL = "https://webdav.example.com"
+$DEF_USERNAME = "user"
+$DEF_PASSWORD = "pass"
+$DEF_TTL = "5s"
 $DEF_MAX_ENTRIES = 100
-$DEF_VERBOSE     = $false
-$DEF_ERR         = "stderr"
-$DEF_STD         = "discard"
+$DEF_VERBOSE = $false
+$DEF_ERR = "stderr"
+$DEF_STD = "discard"
 
 $ask = Read-Host "Would you like to provide configuration values now? (Y/n)"
 if ([string]::IsNullOrWhiteSpace($ask)) { $ask = "Y" }
 
 if ($ask -match '^(?i)y(es)?$') {
-  $mpoint   = Read-Host "Mount point [$DEF_MPOINT]"
+  $mpoint = Read-Host "Mount point [$DEF_MPOINT]"
   if (-not $mpoint) { $mpoint = $DEF_MPOINT }
 
-  $url      = Read-Host "Server URL [$DEF_URL]"
+  $url = Read-Host "Server URL [$DEF_URL]"
   if (-not $url) { $url = $DEF_URL }
 
   $username = Read-Host "Username [$DEF_USERNAME]"
@@ -170,28 +173,28 @@ if ($ask -match '^(?i)y(es)?$') {
 }
 else {
   Write-Host "Using default configuration values."
-  $mpoint      = $DEF_MPOINT
-  $url         = $DEF_URL
-  $username    = $DEF_USERNAME
-  $password    = $DEF_PASSWORD
-  $ttl         = $DEF_TTL
+  $mpoint = $DEF_MPOINT
+  $url = $DEF_URL
+  $username = $DEF_USERNAME
+  $password = $DEF_PASSWORD
+  $ttl = $DEF_TTL
   $max_entries = $DEF_MAX_ENTRIES
-  $verbose     = $DEF_VERBOSE
-  $err         = $DEF_ERR
-  $std         = $DEF_STD
+  $verbose = $DEF_VERBOSE
+  $err = $DEF_ERR
+  $std = $DEF_STD
 }
 
 $cfgContent = @"
 # Mimic configuration (generated)
-mpoint = "$(Escape-Toml $mpoint)"
-url = "$(Escape-Toml $url)"
-username = "$(Escape-Toml $username)"
-password = "$(Escape-Toml $password)"
+mpoint = "$(ConvertTo-TomlString $mpoint)"
+url = "$(ConvertTo-TomlString $url)"
+username = "$(ConvertTo-TomlString $username)"
+password = "$(ConvertTo-TomlString $password)"
 ttl = "$ttl"
 max-entries = $max_entries
 verbose = $($verbose.ToString().ToLower())
-err = "$(Escape-Toml $err)"
-std = "$(Escape-Toml $std)"
+err = "$(ConvertTo-TomlString $err)"
+std = "$(ConvertTo-TomlString $std)"
 "@
 
 if ($userCfg) {

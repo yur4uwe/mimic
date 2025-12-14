@@ -91,7 +91,7 @@ func truncateDown(fpath string) error {
 func truncateUp(fpath string) error {
 	start := time.Now()
 	log.Printf("[truncateUp] start path=%s", fpath)
-	if err := os.Truncate(fpath, 10); err != nil {
+	if err := os.Truncate(fpath, 16); err != nil {
 		log.Printf("[truncateUp] failed after %s: %v", time.Since(start), err)
 		return err
 	}
@@ -100,7 +100,7 @@ func truncateUp(fpath string) error {
 		log.Printf("[truncateUp] read failed after %s: %v", time.Since(start), err)
 		return err
 	}
-	if len(b) != 10 {
+	if len(b) != 16 {
 		err = fmt.Errorf("truncate up wrong size: %d", len(b))
 		log.Printf("[truncateUp] verification failed after %s: %v", time.Since(start), err)
 		return err

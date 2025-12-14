@@ -3,6 +3,6 @@ build/*
 .DS_Store
 *.toml
 *.log
-!example-config.toml
+!./example-config.toml
 dist/
 latest
