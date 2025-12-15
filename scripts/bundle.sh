@@ -13,12 +13,10 @@ fi
 case "$1" in
   linux)
     installer="scripts/install.sh"
-    bin="mimic"
     osname="linux"
     ;;
   win)
     installer="scripts/install.ps1"
-    bin="mimic.exe"
     osname="win"
     ;;
   *)
@@ -41,31 +39,54 @@ copy_or_fail README.md
 copy_or_fail LICENCE
 copy_or_fail INSTALL.md
 copy_or_fail example-config.toml
-copy_or_fail "$bin"
 
-if [ -f "$installer" ]; then
-  cp -p "$installer" build/
+arches=(amd64 arm64)
+if [ "$osname" = "linux" ]; then
+  goos=linux
 else
-  echo "Missing installer: $installer" >&2
-  exit 1
+  goos=windows
 fi
 
-echo "Collected files into build/:"
-ls -lah build
-
-TS=$(date -u +%Y%m%d%H%M%S)
 OUTDIR="$(pwd)/.."
+installer_name="$(basename "$installer")"
 
-if [ "$osname" = "linux" ]; then
-  ARCHIVE_NAME="mimic-linux-${TS}.tar.gz"
-  tar -C build -czf "${OUTDIR}/${ARCHIVE_NAME}" .
-  echo "Created ${OUTDIR}/${ARCHIVE_NAME}"
-else
-  ARCHIVE_NAME="mimic-win-${TS}.zip"
-  if ! command -v zip >/dev/null 2>&1; then
-    echo "zip not found; please install zip to create Windows archive" >&2
+for arch in "${arches[@]}"; do
+  echo "Packaging ${osname}/${arch}"
+  stagedir="build/"
+  rm -rf "${stagedir}"
+  mkdir -p "${stagedir}"
+
+  cp -p README.md LICENCE INSTALL.md example-config.toml "${stagedir}/"
+  if [ -f "$installer" ]; then
+    cp -p "$installer" "${stagedir}/"
+  else
+    echo "Missing installer: $installer" >&2
+    rm -rf "${stagedir}"
     exit 1
   fi
-  zip -j "${OUTDIR}/${ARCHIVE_NAME}" build/* >/dev/null
-  echo "Created ${OUTDIR}/${ARCHIVE_NAME}"
-fi
+
+  if [ "$goos" = "windows" ]; then
+    outbin="mimic-${osname}-${arch}.exe"
+  else
+    outbin="mimic-${osname}-${arch}"
+  fi
+  echo "Building ${outbin} (GOOS=${goos} GOARCH=${arch})"
+  GOOS="${goos}" GOARCH="${arch}" go build -o "${stagedir}/${outbin}" ./cmd/main/main.go
+
+  if [ "$goos" = "linux" ]; then
+    ARCHIVE_NAME="mimic-${osname}-${arch}.tar.gz"
+    tar -C "${stagedir}" -czf "${OUTDIR}/${ARCHIVE_NAME}" .
+    echo "Created ${OUTDIR}/${ARCHIVE_NAME}"
+  else
+    ARCHIVE_NAME="mimic-${osname}-${arch}.zip"
+    if ! command -v zip >/dev/null 2>&1; then
+      echo "zip not found; please install zip to create Windows archive" >&2
+      rm -rf "${stagedir}"
+      exit 1
+    fi
+    zip -j "${OUTDIR}/${ARCHIVE_NAME}" "${stagedir}"/* >/dev/null
+    echo "Created ${OUTDIR}/${ARCHIVE_NAME}"
+  fi
+
+  rm -rf "${stagedir}"
+done

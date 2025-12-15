@@ -117,7 +117,7 @@ func ParseConfig(path string) (*Config, error) {
 }
 
 func usage() {
-	fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [options] <mountpoint> <server>\n", os.Args[0])
+	fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [options] <mountpoint> <server>\n*Important*: To overwrite either mountpoint or server url both must be provided simultaniously\n", os.Args[0])
 	flag.PrintDefaults()
 }
 
@@ -175,11 +175,11 @@ func ParseCommandLineArgs() (*Config, error) {
 
 	args := flag.Args()
 
-	if len(args) == 2 && cfg.Mountpoint == "" {
+	if len(args) == 2 {
 		cfg.Mountpoint = args[0]
 	}
 
-	if len(args) == 2 && cfg.URL == "" {
+	if len(args) == 2 {
 		cfg.URL = args[1]
 	}
 
