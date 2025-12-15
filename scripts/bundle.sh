@@ -66,9 +66,9 @@ for arch in "${arches[@]}"; do
   fi
 
   if [ "$goos" = "windows" ]; then
-    outbin="mimic-${osname}-${arch}.exe"
+    outbin="mimic.exe"
   else
-    outbin="mimic-${osname}-${arch}"
+    outbin="mimic"
   fi
   echo "Building ${outbin} (GOOS=${goos} GOARCH=${arch})"
   GOOS="${goos}" GOARCH="${arch}" go build -o "${stagedir}/${outbin}" ./cmd/main/main.go
