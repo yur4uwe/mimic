@@ -12,12 +12,16 @@ var (
 	ErrOutOfBounds    = errors.New("read/write out of bounds")
 )
 
+type BufferSnapshot struct {
+	Data []byte
+	Base int64
+	Mask Mask
+}
+
 // FileBuffer represents a file image kept in memory for a mapped path.
 type FileBuffer struct {
+	BufferSnapshot
 	mu          sync.RWMutex
-	Mask        Mask
-	Base        int64
-	Data        []byte
 	Dirty       bool
 	HandleCount int
 }
@@ -28,15 +32,15 @@ func (fb *FileBuffer) BasePos() int64 {
 	return fb.Base
 }
 
-func (fb *FileBuffer) CopyBuffer() ([]byte, int64, Mask) {
+func (fb *FileBuffer) CopyBuffer() *BufferSnapshot {
 	fb.mu.RLock()
 	defer fb.mu.RUnlock()
 	if len(fb.Data) == 0 {
-		return nil, fb.Base, nil
+		return &BufferSnapshot{Data: nil, Base: fb.Base, Mask: nil}
 	}
 	cp := make([]byte, len(fb.Data))
 	copy(cp, fb.Data)
-	return cp, fb.Base, fb.Mask
+	return &BufferSnapshot{Data: cp, Base: fb.Base, Mask: fb.Mask}
 }
 
 func (fb *FileBuffer) SetBase(b int64) {
@@ -171,4 +175,15 @@ func (fb *FileBuffer) DecHandle() {
 		fb.HandleCount--
 	}
 	fb.mu.Unlock()
+}
+
+func (fb *FileBuffer) DirtyRange(start, length int64) bool {
+	fb.mu.RLock()
+	defer fb.mu.RUnlock()
+	for i := start; i < start+length; i++ {
+		if !fb.Mask.IsDirty(i) {
+			return false
+		}
+	}
+	return true
 }

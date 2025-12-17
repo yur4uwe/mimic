@@ -64,13 +64,13 @@ func (fs *FuseFS) Mkdir(p string, mode uint32) int {
 	fs.logger.Logf("[Mkdir] path=%s mode=%#o", p, mode)
 	s, err := casters.NormalizePath(p)
 	if err != nil {
-		fs.logger.Errorf("[Mkdir] Path unescape error for path=%s error=%v", p, err)
+		fs.logger.Errorf("[Mkdir] Path unescape error for path=%s error=%v returning EIO", p, err)
 		return -EIO
 	}
 
 	err = fs.client.Mkdir(s, os.FileMode(mode))
 	if err != nil {
-		fs.logger.Errorf("[Mkdir] mkdir error for path=%s error=%v", s, err)
+		fs.logger.Errorf("[Mkdir] mkdir error for path=%s error=%v returning EIO", s, err)
 		return -EIO
 	}
 
@@ -82,7 +82,7 @@ func (fs *FuseFS) Rmdir(path string) int {
 
 	err := fs.client.Rmdir(path)
 	if err != nil {
-		fs.logger.Errorf("[Rmdir] rmdir error for path=%s error=%v", path, err)
+		fs.logger.Errorf("[Rmdir] rmdir error for path=%s error=%v returning EIO", path, err)
 		return -EIO
 	}
 

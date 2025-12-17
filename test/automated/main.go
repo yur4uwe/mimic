@@ -23,6 +23,9 @@ func runCheck(name string, fn checkFunc, mount string) {
 	}
 }
 
+// TODO:
+// - add out of bound read range requests test
+// - test communication between host and guest filesystem
 func main() {
 	if len(os.Args) != 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s MOUNTPOINT\n", os.Args[0])

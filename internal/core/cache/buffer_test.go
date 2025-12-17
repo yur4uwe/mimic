@@ -14,12 +14,12 @@ func TestFileBuffer_WriteAppendRead(t *testing.T) {
 		t.Fatalf("WriteAt(4,A) failed: %v", err)
 	}
 
-	cp, base, _ := fb.CopyBuffer()
-	if base != 0 {
-		t.Fatalf("CopyBuffer base: want 0 got %d", base)
+	cp := fb.CopyBuffer()
+	if fb.Base != 0 {
+		t.Fatalf("CopyBuffer base: want 0 got %d", fb.Base)
 	}
-	if string(cp) != "BASEA" {
-		t.Fatalf("buffer content: want %q got %q", "BASEA", string(cp))
+	if string(cp.Data) != "BASEA" {
+		t.Fatalf("buffer content: want %q got %q", "BASEA", string(cp.Data))
 	}
 
 	// Validate mask bits
@@ -57,12 +57,12 @@ func TestFileBuffer_PrependBehavior(t *testing.T) {
 		t.Fatalf("prepend WriteAt failed: %v", err)
 	}
 
-	cp, base, _ := fb.CopyBuffer()
-	if base != 0 {
-		t.Fatalf("after prepend base: want 0 got %d", base)
+	cp := fb.CopyBuffer()
+	if fb.Base != 0 {
+		t.Fatalf("after prepend base: want 0 got %d", fb.Base)
 	}
-	if string(cp) != "BASEX" {
-		t.Fatalf("after prepend content: want %q got %q", "BASEX", string(cp))
+	if string(cp.Data) != "BASEX" {
+		t.Fatalf("after prepend content: want %q got %q", "BASEX", string(cp.Data))
 	}
 
 	// mask: indices 0..4 should be valid (0..3 from BASE, 4 from X)
@@ -83,9 +83,9 @@ func TestFileBuffer_OverwriteWithin(t *testing.T) {
 	if err := fb.WriteAt(1, []byte("i")); err != nil {
 		t.Fatalf("WriteAt overwrite failed: %v", err)
 	}
-	cp, _, _ := fb.CopyBuffer()
-	if string(cp) != "HiLLO" {
-		t.Fatalf("overwrite result: want %q got %q", "HiLLO", string(cp))
+	cp := fb.CopyBuffer()
+	if string(cp.Data) != "HiLLO" {
+		t.Fatalf("overwrite result: want %q got %q", "HiLLO", string(cp.Data))
 	}
 	// mask should mark first 4 bytes valid
 	for i := range int64(5) {
@@ -106,25 +106,25 @@ func TestFileBuffer_PartialMaskGap(t *testing.T) {
 		t.Fatalf("WriteAt(7,B) failed: %v", err)
 	}
 
-	cp, base, _ := fb.CopyBuffer()
-	if base != 5 {
-		t.Fatalf("sparse base: want 5 got %d", base)
+	cp := fb.CopyBuffer()
+	if fb.Base != 5 {
+		t.Fatalf("sparse base: want 5 got %d", fb.Base)
 	}
 	// expected internal data layout: indices 0:'A',1:0,2:'B' -> length 3
-	if len(cp) != 3 {
-		t.Fatalf("sparse data length: want 3 got %d", len(cp))
+	if len(cp.Data) != 3 {
+		t.Fatalf("sparse data length: want 3 got %d", len(cp.Data))
 	}
-	if cp[0] != 'A' || cp[1] != 0 || cp[2] != 'B' {
+	if cp.Data[0] != 'A' || cp.Data[1] != 0 || cp.Data[2] != 'B' {
 		t.Fatalf("sparse data content: want [%q,0,%q] got [%q,%d,%q]",
-			'A', 'B', cp[0], cp[1], cp[2])
+			'A', 'B', cp.Data[0], cp.Data[1], cp.Data[2])
 	}
 
 	// mask: only offsets 0 and 2 (absolute 5 and 7) should be valid
 	// mask: with page-based mask implementation bytes within the same page
 	// (absolute offsets base..base+2) will all be considered valid
-	if !fb.IsValidAt(base+0) || !fb.IsValidAt(base+1) || !fb.IsValidAt(base+2) {
+	if !fb.IsValidAt(fb.Base+0) || !fb.IsValidAt(fb.Base+1) || !fb.IsValidAt(fb.Base+2) {
 		t.Fatalf("sparse mask (page-granular): expected [true,true,true], got [%v,%v,%v]",
-			fb.IsValidAt(base+0), fb.IsValidAt(base+1), fb.IsValidAt(base+2))
+			fb.IsValidAt(fb.Base+0), fb.IsValidAt(fb.Base+1), fb.IsValidAt(fb.Base+2))
 	}
 }
 
@@ -147,7 +147,7 @@ func TestFileBuffer_ClearAndBounds(t *testing.T) {
 	if fb.IsValidAt(0) {
 		t.Fatalf("after Clear expected no valid bits")
 	}
-	if buf, _, _ := fb.CopyBuffer(); buf != nil {
-		t.Fatalf("after Clear expected nil buffer copy, got len %d", len(buf))
+	if buf := fb.CopyBuffer(); buf != nil {
+		t.Fatalf("after Clear expected nil buffer copy, got len %d", len(buf.Data))
 	}
 }

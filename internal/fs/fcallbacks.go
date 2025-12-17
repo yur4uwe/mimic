@@ -18,19 +18,19 @@ func (fs *FuseFS) Truncate(p string, size int64, fh uint64) int {
 
 	file, ok := fs.GetHandle(fh)
 	if ok && file != nil && !file.Flags().WriteAllowed() {
-		fs.logger.Errorf("[Truncate] access denied for %s, flag state: %+v", p, file.Flags())
+		fs.logger.Errorf("[Truncate] access denied for %s, flag state: %+v return EACCES", p, file.Flags())
 		return -EACCES
 	}
 
 	norm, err := casters.NormalizePath(p)
 	if err != nil {
-		fs.logger.Errorf("[Truncate] Path normalize error for path=%s error=%v", p, err)
+		fs.logger.Errorf("[Truncate] Path normalize error for path=%s error=%v return EIO", p, err)
 		return -EIO
 	}
 
 	err = fs.client.Truncate(norm, size)
 	if err != nil {
-		fs.logger.Errorf("[Truncate] truncate error for path=%s size=%d: %v", p, size, err)
+		fs.logger.Errorf("[Truncate] truncate error for path=%s size=%d: %v return EIO", p, size, err)
 		return -EIO
 	}
 
@@ -38,17 +38,18 @@ func (fs *FuseFS) Truncate(p string, size int64, fh uint64) int {
 }
 
 func (fs *FuseFS) Unlink(p string) int {
+	// Add handle deletion after successful removal
 	fs.logger.Logf("[Unlink]: path=%s", p)
 	if strings.HasSuffix(p, "/") && p != "/" {
 		p = strings.TrimSuffix(p, "/")
 	}
 	norm, err := casters.NormalizePath(p)
 	if err != nil {
-		fs.logger.Errorf("[Unlink] Path normalize error for path=%s error=%v", p, err)
+		fs.logger.Errorf("[Unlink] Path normalize error for path=%s error=%v return EIO", p, err)
 		return -EIO
 	}
 	if err := fs.client.Remove(norm); err != nil {
-		fs.logger.Errorf("[Unlink] remove error for path=%s: %v", p, err)
+		fs.logger.Errorf("[Unlink] remove error for path=%s: %v return EIO", p, err)
 		return -EIO
 	}
 
@@ -58,16 +59,15 @@ func (fs *FuseFS) Unlink(p string) int {
 func (fs *FuseFS) Write(path string, buffer []byte, offset int64, file_handle uint64) int {
 	file, ok := fs.GetHandle(file_handle)
 	if !ok {
-		fs.logger.Errorf("[Write] invalid file handle=%d for path=%s", file_handle, path)
+		fs.logger.Errorf("[Write] invalid file handle=%d for path=%s returning EIO", file_handle, path)
 		return -EIO
 	}
 
 	if !file.Flags().WriteAllowed() {
-		fs.logger.Errorf("[Write] access denied for %s, flag state: %+v", path, file.Flags())
+		fs.logger.Errorf("[Write] access denied for %s, flag state: %+v returning EACCES", path, file.Flags())
 		return -EACCES
 	}
 
-	file.MLock()
 	file.AddToBuffer(offset, buffer)
 	end := offset + int64(len(buffer))
 	if file.stat != nil {
@@ -75,10 +75,9 @@ func (fs *FuseFS) Write(path string, buffer []byte, offset int64, file_handle ui
 			file.stat.Size = end
 		}
 	}
-	file.MUnlock()
 
-	// bufCopy, bufBase, _ := file.CopyBuffer()
-	// fs.logger.Logf("[Write] buffer after write path=%s base=%d len=%d dirty=%v", path, bufBase, len(bufCopy), file.IsDirty())
+	// buf := file.CopyBuffer()
+	// fs.logger.Logf("[Write] buffer len=%d offset=%d, after write: path=%s base=%d len=%d dirty=%v", len(buffer), offset, path, buf.Base, len(buf.Data), file.IsDirty())
 
 	return len(buffer)
 }
@@ -92,10 +91,10 @@ func (fs *FuseFS) Create(path string, flags int, mode uint32) (int, uint64) {
 
 	if err := fs.client.Create(path); err != nil {
 		if os.IsPermission(err) || helpers.IsForbiddenErr(err) {
-			fs.logger.Errorf("[Create]: permission denied for path=%s", path)
+			fs.logger.Errorf("[Create]: permission denied for path=%s returning EACCES", path)
 			return -EACCES, 0
 		}
-		fs.logger.Errorf("[Create]: remote write failed path=%s err=%v", path, err)
+		fs.logger.Errorf("[Create]: remote write failed path=%s err=%v returning EIO", path, err)
 		return -EIO, 0
 	}
 
@@ -112,11 +111,10 @@ func (fs *FuseFS) Create(path string, flags int, mode uint32) (int, uint64) {
 func (fs *FuseFS) Release(path string, file_handle uint64) (errc int) {
 	fs.logger.Logf("[Release] path=%s handle=%d", path, file_handle)
 	defer fs.handles.Delete(file_handle)
-	return fs.Flush(path, file_handle)
+	return 0
 }
 
 func (fs *FuseFS) Flush(path string, file_handle uint64) (errc int) {
-	fs.logger.Logf("[Flush]: path=%s fh=%d", path, file_handle)
 	fh, ok := fs.GetHandle(file_handle)
 	if !ok {
 		fs.logger.Errorf("[Flush] invalid file handle=%d for path=%s", file_handle, path)
@@ -124,42 +122,41 @@ func (fs *FuseFS) Flush(path string, file_handle uint64) (errc int) {
 	}
 
 	if !fh.IsDirty() {
-		fs.logger.Logf("[Flush] no dirty data for path=%s", path)
 		return 0
 	}
 
 	if !fh.Flags().WriteAllowed() {
-		fs.logger.Errorf("[Flush] access denied for %s, flag state: %+v", path, fh.Flags())
 		return 0
 	}
 
 	fh.MLock()
 	defer fh.MUnlock()
-	buf, off, _ := fh.CopyBuffer()
-	fs.logger.Logf("[Flush] about to write path=%s buffer_len=%d buffer_off=%d", fh.Path(), len(buf), off)
-	if err := fs.client.WriteOffset(fh.Path(), buf, off); err != nil {
+	buf := fh.CopyBuffer()
+	fs.logger.Logf("[Flush] about to write path=%s buffer_len=%d buffer_off=%d", fh.Path(), len(buf.Data), buf.Base)
+	if err := fs.client.WriteOffset(fh.Path(), buf.Data, buf.Base); err != nil {
 		if helpers.IsForbiddenErr(err) {
+			fs.logger.Logf("[Flush] WriteOffset forbidden for %s: %v; returning EACCES", fh.Path(), err)
 			return -EACCES
 		}
 		if helpers.IsNotExistErr(err) && fh.Flags().Create() {
-			end := off + int64(len(buf))
+			end := buf.Base + int64(len(buf.Data))
 			if end > int64(^uint(0)>>1) {
 				fs.logger.Logf("[Flush] too large allocate for %s; returning EIO", fh.Path())
 				return -EIO
 			}
 			full := make([]byte, int(end))
-			copy(full[int(off):], buf)
+			copy(full[int(buf.Base):], buf.Data)
 			if werr := fs.client.Write(fh.Path(), full); werr != nil {
-				fs.logger.Logf("[Flush] client.Write error for %s: %v; returning EIO", fh.Path(), werr)
+				fs.logger.Logf("[Flush] Write error for %s: %v; returning EIO", fh.Path(), werr)
 				return -EIO
 			}
 		} else {
-			fs.logger.Logf("[Flush] client.WriteOffset error for %s: %v; returning EIO", fh.Path(), err)
+			fs.logger.Logf("[Flush] WriteOffset error for %s: %v; returning EIO", fh.Path(), err)
 			return -EIO
 		}
 	}
 	fh.ClearBuffer()
-	fh.remoteSize = off + int64(len(buf))
+	fh.remoteSize = buf.Base + int64(len(buf.Data))
 
 	return 0
 }
@@ -173,18 +170,20 @@ func (fs *FuseFS) Access(path string, mode uint32) int {
 	fs.logger.Logf("[Access]: path=%s mode=%#o", path, mode)
 	norm, err := casters.NormalizePath(path)
 	if err != nil {
-		fs.logger.Errorf("[Access] Path normalize error for path=%s error=%v", path, err)
+		fs.logger.Errorf("[Access] Path normalize error for path=%s error=%v returning EIO", path, err)
 		return -EIO
 	}
 
 	_, err = fs.client.Stat(norm)
 	if err != nil {
 		if helpers.IsNotExistErr(err) {
+			fs.logger.Errorf("[Access] path=%s not found returning ENOENT", path)
 			return -ENOENT
 		} else if helpers.IsForbiddenErr(err) {
+			fs.logger.Errorf("[Access] permission denied for path=%s returning EACCES", path)
 			return -EACCES
 		}
-		fs.logger.Errorf("[Access] Stat error for path=%s: %v", path, err)
+		fs.logger.Errorf("[Access] Stat error for path=%s: %v returning EIO", path, err)
 		return -EIO
 	}
 
@@ -194,12 +193,12 @@ func (fs *FuseFS) Access(path string, mode uint32) int {
 func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uint64) int {
 	fh, ok := fs.GetHandle(file_handle)
 	if !ok {
-		fs.logger.Errorf("[Read] invalid file handle=%d for path=%s", file_handle, path)
+		fs.logger.Errorf("[Read] invalid file handle=%d for path=%s returning EIO", file_handle, path)
 		return -EIO
 	}
 
 	if !fh.Flags().ReadAllowed() {
-		fs.logger.Errorf("[Read] access denied for %s, flag state: %+v", path, fh.Flags())
+		fs.logger.Errorf("[Read] access denied for %s, flag state: %+v returning EACCES", path, fh.Flags())
 		return -EACCES
 	}
 
@@ -218,12 +217,12 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 	}
 
 	// Snapshot dirty buffer (copy) and its base offset
-	bufData, bufBase, bufMask := fh.CopyBuffer()
+	buf := fh.CopyBuffer()
 
-	// If no dirty buffer, do a remote read with readahead and save progress into buffer
-	if !fh.IsDirty() || len(bufData) == 0 {
-		// EOF
-		if fh.stat != nil && reqStart >= fh.remoteSize {
+	// If no dirty buffer, do a simple remote read
+	if !fh.IsDirty() || len(buf.Data) == 0 {
+		// if we know remote size and request starts beyond it -> EOF
+		if fh.stat != nil && reqStart >= fh.stat.Size {
 			return 0
 		}
 
@@ -250,6 +249,7 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 			if helpers.IsNotExistErr(err) {
 				return 0
 			} else if helpers.IsForbiddenErr(err) {
+				fs.logger.Errorf("[Read] ReadRange forbidden for %s offset=%d len=%d: %v return EACCES", path, reqStart, reqLen, err)
 				return -EACCES
 			}
 			fs.logger.Errorf("[Read] ReadRange error for %s offset=%d len=%d: %v", path, reqStart, readAheadLen, err)
@@ -260,7 +260,13 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 		if len(remoteBuf) > 0 {
 			fh.MLock()
 			if fh.buffer == nil {
-				fh.buffer = &cache.FileBuffer{Data: make([]byte, 0)}
+				fh.buffer = &cache.FileBuffer{
+					BufferSnapshot: cache.BufferSnapshot{
+						Data: make([]byte, 0),
+						Base: 0,
+						Mask: cache.Mask(make([]byte, 0)),
+					},
+				}
 				fh.buffer.IncHandle()
 			}
 			// write fetched remote bytes into buffer, then mark clean (we didn't modify data)
@@ -279,33 +285,33 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 		return n
 	}
 
-	// We have dirty data: fetch remote range (unless stat proves remote has none)
 	var remoteBuf []byte
-	if fh.stat != nil && reqStart >= fh.stat.Size {
-		remoteBuf = []byte{}
-	} else {
-		rb, err := fs.client.ReadRange(fh.Path(), reqStart, reqLen)
-		if err != nil {
-			if helpers.IsNotExistErr(err) {
-				remoteBuf = []byte{}
-			} else if helpers.IsForbiddenErr(err) {
-				fs.logger.Errorf("[Read] ReadRange forbidden for %s offset=%d len=%d: %v", path, reqStart, reqLen, err)
-				return -EACCES
-			} else {
-				fs.logger.Errorf("[Read] ReadRange error for %s offset=%d len=%d: %v", path, reqStart, reqLen, err)
-				return -EIO
-			}
+	if fh.stat != nil && reqStart <= fh.stat.Size {
+		actualLen := min(reqLen, fh.remoteSize-reqStart)
+		if actualLen <= 0 {
+			goto merge
+		}
+
+		var err error
+		remoteBuf, err = fs.client.ReadRange(fh.Path(), reqStart, actualLen)
+		if err == nil {
+			goto merge
+		}
+
+		if helpers.IsNotExistErr(err) {
+			goto merge
+		} else if helpers.IsForbiddenErr(err) {
+			fs.logger.Errorf("[Read] ReadRange forbidden for %s offset=%d len=%d: %v return EACCES", path, reqStart, reqLen, err)
+			return -EACCES
 		} else {
-			remoteBuf = rb
-			if int64(len(remoteBuf)) > reqLen {
-				remoteBuf = remoteBuf[:reqLen]
-			}
+			fs.logger.Errorf("[Read] ReadRange error for %s offset=%d len=%d: %v return EIO", path, reqStart, reqLen, err)
+			return -EIO
 		}
 	}
 
-	// Merge remote bytes and dirty buffer (buffer overrides remote)
-	merged := helpers.MergeRemoteAndBuffer(remoteBuf, reqStart, bufData, bufBase, bufMask, reqStart, int(reqLen))
-	fs.logger.Logf("[Read] merged buffer for %s offset=%d len=%d remote_len=%d buf_len=%d merged_len=%d", path, reqStart, reqLen, len(remoteBuf), len(bufData), len(merged))
+merge:
+	merged := helpers.MergeRemoteAndBuffer(remoteBuf, reqStart, buf.Data, buf.Base, buf.Mask, reqStart, int(reqLen))
+	// fs.logger.Logf("[Read] merged buffer for %s offset=%d len=%d remote_len=%d buf_len=%d merged_len=%d", path, reqStart, reqLen, len(remoteBuf), len(buf.Data), len(merged))
 	if len(merged) == 0 {
 		return 0
 	}

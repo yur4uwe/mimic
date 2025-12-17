@@ -34,8 +34,8 @@ func (fs *FuseFS) Getattr(p string, stat *fuselib.Stat_t, fh uint64) int {
 
 	norm, err := casters.NormalizePath(p)
 	if err != nil {
-		fs.logger.Errorf("[Getattr] Path normalize error for path=%s error=%v", p, err)
-		return -ENOENT
+		fs.logger.Errorf("[Getattr] Path normalize error for path=%s error=%v returning EIO", p, err)
+		return -EIO
 	}
 
 	if fi, ok := fs.GetHandle(fh); ^uint64(0) != fh && ok {
@@ -93,13 +93,13 @@ func (fs *FuseFS) Open(path string, oflags int) (int, uint64) {
 
 	if flags.Create() && helpers.IsNotExistErr(err) {
 		if err := fs.client.Create(path); err != nil {
-			fs.logger.Errorf("[Open] remote create failed path=%s err=%v", path, err)
+			fs.logger.Errorf("[Open] remote create failed path=%s err=%v returning EIO", path, err)
 			return -EIO, 0
 		}
 	}
 
 	if flags.Exclusive() && !helpers.IsNotExistErr(err) {
-		fs.logger.Errorf("[Open] file exists and exclusive flag set path=%s", path)
+		fs.logger.Errorf("[Open] file exists and exclusive flag set path=%s returning EEXIST", path)
 		return -EEXIST, 0
 	}
 
@@ -115,7 +115,7 @@ func (fs *FuseFS) Rename(oldPath string, newPath string) int {
 
 	err := fs.client.Rename(oldPath, newPath)
 	if err != nil {
-		fs.logger.Errorf("[Rename] rename error from %s to %s: %v", oldPath, newPath, err)
+		fs.logger.Errorf("[Rename] rename error from %s to %s: %v returning EIO", oldPath, newPath, err)
 		return -EIO
 	}
 

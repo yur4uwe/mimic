@@ -30,7 +30,9 @@ func (bc *BufferCache) GetOrCreate(path string) *FileBuffer {
 	}
 
 	fb := &FileBuffer{
-		Data:        make([]byte, 0),
+		BufferSnapshot: BufferSnapshot{
+			Data: make([]byte, 0),
+		},
 		HandleCount: 1,
 	}
 	actual, _ := bc.entries.LoadOrStore(path, fb)

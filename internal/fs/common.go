@@ -37,12 +37,15 @@ func (fh *FileHandle) MUnlock() {
 }
 
 func (fh *FileHandle) AddToBuffer(offset int64, data []byte) {
+	fh.mu.Lock()
+	defer fh.mu.Unlock()
 	if len(data) == 0 {
 		return
 	}
 	if fh.buffer == nil {
 		// defensive: create per-handle buffer if not set (should be set by fs.NewHandle)
-		fh.buffer = &cache.FileBuffer{Data: make([]byte, 0)}
+		fh.buffer = &cache.FileBuffer{}
+		fh.buffer.Data = make([]byte, 0)
 		fh.buffer.IncHandle()
 	}
 	// Use absolute offsets (current code treats buffer Data[0] as file offset 0).
@@ -60,9 +63,9 @@ func (fh *FileHandle) ClearBuffer() {
 }
 
 // nil, 0 if no buffer
-func (fh *FileHandle) CopyBuffer() ([]byte, int64, cache.Mask) {
+func (fh *FileHandle) CopyBuffer() *cache.BufferSnapshot {
 	if fh.buffer == nil {
-		return nil, 0, nil
+		return &cache.BufferSnapshot{}
 	}
 	return fh.buffer.CopyBuffer()
 }

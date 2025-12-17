@@ -47,7 +47,7 @@ func NewWebdavClient(cache *cache.NodeCache, baseURL, username, password string)
 
 func (w *WebdavClient) Stat(name string) (os.FileInfo, error) {
 	if fi, ok := w.cache.Get(name); ok {
-		fmt.Println("[Cache] Stat cache hit for", name)
+		// fmt.Println("[Cache] Stat cache hit for", name)
 		return fi.Info, nil
 	}
 
