@@ -87,8 +87,8 @@ func TestFileBuffer_OverwriteWithin(t *testing.T) {
 	if string(cp) != "HiLLO" {
 		t.Fatalf("overwrite result: want %q got %q", "HiLLO", string(cp))
 	}
-	// mask should mark first 5 bytes valid
-	for i := int64(0); i < 5; i++ {
+	// mask should mark first 4 bytes valid
+	for i := range int64(5) {
 		if !fb.IsValidAt(i) {
 			t.Fatalf("expected valid bit at %d after overwrite", i)
 		}
@@ -114,10 +114,17 @@ func TestFileBuffer_PartialMaskGap(t *testing.T) {
 	if len(cp) != 3 {
 		t.Fatalf("sparse data length: want 3 got %d", len(cp))
 	}
-	// mask: index 0 valid, 1 invalid, 2 valid -> relative indices
-	if !fb.IsValidAt(0) || fb.IsValidAt(1) || !fb.IsValidAt(2) {
-		t.Fatalf("sparse mask: expected [true,false,true], got [%v,%v,%v]",
-			fb.IsValidAt(0), fb.IsValidAt(1), fb.IsValidAt(2))
+	if cp[0] != 'A' || cp[1] != 0 || cp[2] != 'B' {
+		t.Fatalf("sparse data content: want [%q,0,%q] got [%q,%d,%q]",
+			'A', 'B', cp[0], cp[1], cp[2])
+	}
+
+	// mask: only offsets 0 and 2 (absolute 5 and 7) should be valid
+	// mask: with page-based mask implementation bytes within the same page
+	// (absolute offsets base..base+2) will all be considered valid
+	if !fb.IsValidAt(base+0) || !fb.IsValidAt(base+1) || !fb.IsValidAt(base+2) {
+		t.Fatalf("sparse mask (page-granular): expected [true,true,true], got [%v,%v,%v]",
+			fb.IsValidAt(base+0), fb.IsValidAt(base+1), fb.IsValidAt(base+2))
 	}
 }
 

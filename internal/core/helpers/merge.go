@@ -47,7 +47,7 @@ func MergeRemoteAndBuffer(remote []byte, remoteStart int64, bufData []byte, bufS
 				copy(out[dst:dst+end-start], bufData[src:src+end-start])
 			} else {
 				for i := int64(0); i < end-start; i++ {
-					if bufMask.IsSet(src + i) {
+					if bufMask.IsDirty(src + i) {
 						out[dst+i] = bufData[src+i]
 					}
 				}

@@ -191,7 +191,6 @@ func (fs *FuseFS) Access(path string, mode uint32) int {
 }
 
 func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uint64) int {
-
 	fh, ok := fs.GetHandle(file_handle)
 	if !ok {
 		fs.logger.Errorf("[Read] invalid file handle=%d for path=%s", file_handle, path)
@@ -202,6 +201,13 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 		fs.logger.Errorf("[Read] access denied for %s, flag state: %+v", path, fh.Flags())
 		return -EACCES
 	}
+
+	// 1. Check dirty buffer for overlapping pages
+	// 2. Fetch remote state for file on buffer miss
+	// 3. Merge with letting buffer override
+	// 4. Should fill buffer with fetced info
+
+	// temporarily do full read to test speed increase from buffering
 
 	// requested window
 	reqStart := offset

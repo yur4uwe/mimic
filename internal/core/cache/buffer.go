@@ -89,7 +89,7 @@ func (fb *FileBuffer) WriteAt(offset int64, data []byte) error {
 		fb.Data = make([]byte, len(data))
 		copy(fb.Data, data)
 		fb.Mask = make(Mask, maskSize(int64(len(data))))
-		fb.Mask.setValid(0, int64(len(data)))
+		fb.Mask.smearPages(0, int64(len(data)))
 		fb.Dirty = true
 		return nil
 	}
@@ -107,7 +107,7 @@ func (fb *FileBuffer) WriteAt(offset int64, data []byte) error {
 			copy(newData, fb.Data)
 			fb.Data = newData
 		}
-		fb.Mask.setValid(relStart, end)
+		fb.Mask.smearPages(relStart, end)
 		copy(fb.Data[relStart:end], data)
 		fb.Dirty = true
 		return nil
@@ -123,8 +123,8 @@ func (fb *FileBuffer) WriteAt(offset int64, data []byte) error {
 	// copy existing data after the prepend region
 	copy(newData[prepend:newLen], fb.Data)
 
-	fb.Mask = fb.Mask.shiftedRight(int64(len(fb.Data)), prepend, int64(len(newData)))
-	fb.Mask.setValid(0, int64(len(data)))
+	fb.Mask = fb.Mask.shiftedRight(prepend, int64(len(newData)))
+	fb.Mask.smearPages(0, int64(len(data)))
 
 	fb.Base = offset
 	fb.Data = newData
@@ -141,7 +141,10 @@ func (fb *FileBuffer) Clear() {
 }
 
 func (fb *FileBuffer) IsValidAt(i int64) bool {
-	return fb.Mask.IsSet(i)
+	if i < fb.Base || i >= fb.Base+int64(len(fb.Data)) {
+		return false
+	}
+	return fb.Mask.IsDirty(i - fb.Base)
 }
 
 func (fb *FileBuffer) Size() int64 {

@@ -1,13 +1,19 @@
 package cache
 
-type Mask []byte
+const (
+	PageSize = 4096 // bytes = 4 kB
+)
 
-func bitIndex(idx int64) byte {
-	return 1 << uint(idx&7)
+func pageIndexMask(pageIndex int64) (bitIndex byte, byteIndex int) {
+	bitIndex = 1 << uint(pageIndex&7)
+	byteIndex = int(pageIndex >> 3)
+	return
 }
 
+type Mask []byte
+
 func maskSize(size int64) int {
-	return int((size + 7) >> 3)
+	return int((size + PageSize) >> 12)
 }
 
 func (m *Mask) ensureSize(size int64) {
@@ -19,40 +25,33 @@ func (m *Mask) ensureSize(size int64) {
 	}
 }
 
-func (m *Mask) setValid(start, length int64) {
+func (m *Mask) smearPages(start, length int64) {
 	if length <= 0 {
 		return
 	}
 	end := start + length
 	m.ensureSize(end)
-	data := *m
-	for i := start; i < end; {
-		idx := i >> 3
-		bitOffset := i & 7
-		upto := ((idx + 1) << 3) - i
-		if upto > (end - i) {
-			upto = end - i
-		}
-		var b byte
-		for k := int64(0); k < upto; k++ {
-			b |= bitIndex(bitOffset + k)
-		}
-		data[idx] |= b
-		i += upto
+
+	startPageIdx := start >> 12
+	endPageIdx := (end + PageSize - 1) >> 12
+
+	for pageIdx := startPageIdx; pageIdx < endPageIdx; pageIdx++ {
+		pageMaskBitIndex, pageMaskByteIndex := pageIndexMask(pageIdx)
+		(*m)[pageMaskByteIndex] |= pageMaskBitIndex
 	}
 }
 
-func (m Mask) IsSet(i int64) bool {
-	if i < 0 {
+func (m Mask) IsDirty(byteIndex int64) bool {
+	if byteIndex < 0 {
 		return false
 	}
 
-	byteIndex := i >> 3
-	if byteIndex >= int64(len(m)) {
+	pageMaskBitIndex, pageByteIndex := pageIndexMask(byteIndex >> 12)
+	if pageByteIndex >= len(m) {
 		return false
 	}
 
-	return (m[byteIndex] & bitIndex(i)) != 0
+	return (m[pageByteIndex] & pageMaskBitIndex) != 0
 }
 
 func (m *Mask) clear() {
@@ -61,29 +60,48 @@ func (m *Mask) clear() {
 
 // shiftedRight returns a new Mask shifted by shiftedBytes to the right,
 // needed when the buffer is grown at the beginning.
-// for growing at the end, use setValid instead.
-func (m Mask) shiftedRight(oldLen int64, shiftedBytes int64, newLen int64) Mask {
+// for growing at the end, use smearPages instead.
+func (m Mask) shiftedRight(shiftedBytes int64, newLen int64) Mask {
 	newMaskBytes := maskSize(newLen)
 	newMask := make([]byte, newMaskBytes)
 
-	// fast-path: nothing to shift or empty mask
+	// nothing to shift or empty mask
 	if shiftedBytes == 0 || len(m) == 0 {
 		copy(newMask, m)
 		return newMask
 	}
 
-	for oldIdx := range oldLen {
-		if !m.IsSet(oldIdx) {
-			continue
-		}
+	shiftedPages := shiftedBytes >> 12
+	if shiftedPages == 0 {
+		// less than a page shift, copy existing mask
+		copy(newMask, m)
+		return newMask
+	}
 
-		newIdx := oldIdx + shiftedBytes
-		if newIdx < 0 || newIdx >= newLen {
-			// shifted bit would be out of range for the new mask
-			continue
+	if shiftedPages%8 == 0 {
+		// byte-aligned shift
+		byteShift := shiftedPages >> 3
+		for i := 0; i < len(m); i++ {
+			newIdx := i + int(byteShift)
+			if newIdx >= len(newMask) {
+				break
+			}
+			newMask[newIdx] = m[i]
 		}
-		newByteIndex := newIdx >> 3
-		newMask[newByteIndex] |= bitIndex(newIdx)
+		return newMask
+	}
+
+	// left shift pages inside the byte array, preserve carry
+	// for larger shifts subtract multiples of 8 and use newMask[i + byteShift]
+	byteOffset := shiftedPages >> 3
+	shiftedPages = shiftedPages & 7
+	byteCarry := byte(0)
+	for i := range m {
+		currentByteState := m[i]
+		newByteState := (currentByteState << uint(shiftedPages)) | byteCarry
+		newMask[i+int(byteOffset)] = newByteState
+		// prepare carry for next byte
+		byteCarry = (currentByteState >> uint(8-shiftedPages)) & 0xFF
 	}
 
 	return newMask

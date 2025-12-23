@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"fmt"
 	"testing"
 )
 
@@ -15,79 +14,99 @@ func TestMaskEnsureSize(t *testing.T) {
 	}
 }
 
-func TestMaskSetValidAndIsSet(t *testing.T) {
+func TestSmearPagesAndIsDirty(t *testing.T) {
 	var m Mask
-	// set bytes 3..7 (length 5 -> indices 3,4,5,6,7)
-	m.setValid(3, 5)
+	// smear a small byte range that lives within the first page
+	m.smearPages(3, 5) // bytes 3..7 -> page 0
 
-	cases := map[int64]bool{
-		2: false,
-		3: true,
-		4: true,
-		7: true,
-		8: false,
+	if !m.IsDirty(0) {
+		t.Fatalf("expected page containing byte 0 to be dirty")
 	}
-	for idx, exp := range cases {
-		if got := m.IsSet(idx); got != exp {
-			t.Fatalf("isSet(%d): expected %v, got %v", idx, exp, got)
-		}
+	if !m.IsDirty(3) {
+		t.Fatalf("expected page containing byte 3 to be dirty")
+	}
+	if !m.IsDirty(PageSize - 1) {
+		t.Fatalf("expected last byte of first page to be dirty")
+	}
+	if m.IsDirty(PageSize) {
+		t.Fatalf("expected first byte of second page to be clean")
+	}
+}
+
+func TestSmearPagesCrossPageBoundary(t *testing.T) {
+	var m Mask
+	// range that crosses from page 0 into page 1
+	start := int64(PageSize - 100)
+	length := int64(200)
+	m.smearPages(start, length)
+
+	if !m.IsDirty(start) {
+		t.Fatalf("expected byte %d to be dirty", start)
+	}
+	if !m.IsDirty(PageSize + 50) {
+		t.Fatalf("expected byte %d in next page to be dirty", PageSize+50)
 	}
 }
 
 func TestMaskClear(t *testing.T) {
 	var m Mask
-	m.setValid(0, 4) // set 0..3
-	if !m.IsSet(2) {
-		t.Fatalf("precondition failed: expected bit 2 set")
+	m.smearPages(0, PageSize) // mark first page
+	if !m.IsDirty(PageSize / 2) {
+		t.Fatalf("precondition failed: expected page to be dirty")
 	}
 	m.clear()
-	for i := int64(0); i < 8; i++ {
-		if m.IsSet(i) {
-			t.Fatalf("clear: expected bit %d to be unset", i)
-		}
+	if m.IsDirty(PageSize / 2) {
+		t.Fatalf("clear: expected page to be unset")
 	}
 }
 
-func TestMaskShiftedRight(t *testing.T) {
+func TestShiftedRight_PageShift(t *testing.T) {
 	var m Mask
-	// mark bytes 0..1 and byte 5
-	m.setValid(0, 2) // indices 0,1
-	m.setValid(5, 1) // index 5
+	// mark page 0, page 1, and page 5
+	m.smearPages(0, PageSize*2)
+	m.smearPages(PageSize*5, PageSize)
 
-	oldLen := int64(6)
-	shiftBy := int64(3)
-	newLen := oldLen + shiftBy
-	newMask := m.shiftedRight(oldLen, shiftBy, newLen)
+	oldLen := int64(PageSize * 6)
+	shiftBy := int64(PageSize * 3)
+	newLen := int64(oldLen + shiftBy)
+	newMask := m.shiftedRight(shiftBy, newLen)
 
-	// old 0 -> new 3, old1 -> new4, old5 -> new8
-	expectSet := map[int64]bool{
-		0: false,
-		1: false,
-		2: false,
-		3: true,
-		4: true,
-		5: false,
-		6: false,
-		7: false,
-
-		8: true,
+	// old page 0 -> new at offset shiftBy
+	if !newMask.IsDirty(0 + shiftBy) {
+		t.Fatalf("shiftedRight: expected old page 0 to move to %d", shiftBy)
 	}
-	for idx, exp := range expectSet {
-		if got := newMask.IsSet(idx); got != exp {
-			fmt.Printf("Mask state: %b", newMask)
-			t.Fatalf("shiftedRight: bit %d expected %v got %v", idx, exp, got)
-		}
+	// old page 1 -> new at shiftBy + PageSize
+	if !newMask.IsDirty(PageSize + shiftBy) {
+		t.Fatalf("shiftedRight: expected old page 1 to move to %d", PageSize+shiftBy)
+	}
+	// old page 5 -> new at shiftBy + 5*PageSize
+	if !newMask.IsDirty(5*PageSize + shiftBy) {
+		t.Fatalf("shiftedRight: expected old page 5 to move to %d", 5*PageSize+shiftBy)
 	}
 }
 
-func TestMaskSetValidCrossByteBoundary(t *testing.T) {
+func TestShiftedRight_ByteAlignedShift(t *testing.T) {
 	var m Mask
-	// set a range that crosses a mask byte boundary, e.g., start=6 length=6 -> indices 6..11
-	m.setValid(6, 6)
-	for i := int64(0); i < 12; i++ {
-		expect := (i >= 6 && i < 12)
-		if got := m.IsSet(i); got != expect {
-			t.Fatalf("cross-boundary setValid: index %d expected %v got %v", i, expect, got)
-		}
+	// mark page 0, page 1, and page 5
+	m.smearPages(0, PageSize*2)
+	m.smearPages(PageSize*5, PageSize)
+
+	oldLen := int64(PageSize * 6)
+	shiftedPages := int64(8) // byte-aligned shift (8 pages -> 1 mask byte)
+	shiftBy := int64(PageSize * shiftedPages)
+	newLen := int64(oldLen + shiftBy)
+	newMask := m.shiftedRight(shiftBy, newLen)
+
+	// old page 0 -> new at offset shiftBy
+	if !newMask.IsDirty(0 + shiftBy) {
+		t.Fatalf("shiftedRight (byte-aligned): expected old page 0 to move to %d", shiftBy)
+	}
+	// old page 1 -> new at shiftBy + PageSize
+	if !newMask.IsDirty(PageSize + shiftBy) {
+		t.Fatalf("shiftedRight (byte-aligned): expected old page 1 to move to %d", PageSize+shiftBy)
+	}
+	// old page 5 -> new at shiftBy + 5*PageSize
+	if !newMask.IsDirty(5*PageSize + shiftBy) {
+		t.Fatalf("shiftedRight (byte-aligned): expected old page 5 to move to %d", 5*PageSize+shiftBy)
 	}
 }
