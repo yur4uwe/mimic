@@ -1,12 +1,13 @@
 package helpers
 
 import (
+	"fmt"
+
 	"github.com/mimic/internal/core/cache"
 )
 
 const (
-	READAHEAD_DEFAULT int64 = 8 * 1024  // 8 KB
-	READAHEAD_MAX     int64 = 64 * 1024 // 64 KB cap
+	READAHEAD_DEFAULT int64 = 64 * 1024 // 64 KB mimimum readahead
 )
 
 func PageAlignedRange(offset, length, remoteSize int64) (int64, int64) {
@@ -16,12 +17,13 @@ func PageAlignedRange(offset, length, remoteSize int64) (int64, int64) {
 
 	// compute readahead length: at least requested length, at least READAHEAD_DEFAULT,
 	// but capped to READAHEAD_MAX and remote size when known
-	readAheadLen = min(max(readAheadLen, int64(READAHEAD_DEFAULT)), READAHEAD_MAX)
+	readAheadLen = max(readAheadLen, READAHEAD_DEFAULT)
 
 	// don't read past known remote end
 	if reqPageStart+readAheadLen > remoteSize {
+		fmt.Println("EOF")
 		readAheadLen = max(remoteSize-reqPageStart, 0)
 	}
 
-	return offset, length
+	return reqPageStart, readAheadLen
 }

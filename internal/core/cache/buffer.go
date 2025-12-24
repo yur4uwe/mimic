@@ -136,6 +136,83 @@ func (fb *FileBuffer) WriteAt(offset int64, data []byte) error {
 	return nil
 }
 
+// WriteRemoteAt writes data fetched from remote into the buffer but does not
+// mark the buffer as dirty. It will not overwrite pages that are already
+// present (mask indicates presence) — only pages that are not marked will
+// be populated.
+func (fb *FileBuffer) WriteRemoteAt(offset int64, data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+	if offset < 0 {
+		return ErrNegativeOffset
+	}
+
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+
+	// no data yet, create new buffer and mark presence for incoming data
+	if len(fb.Data) == 0 {
+		fb.Base = offset
+		fb.Data = make([]byte, len(data))
+		copy(fb.Data, data)
+		fb.Mask = make(Mask, maskSize(int64(len(data))))
+		fb.Mask.smearPages(0, int64(len(data)))
+		return nil
+	}
+
+	relStart := offset - fb.Base
+
+	// if write starts within current data
+	if relStart >= 0 {
+		end := relStart + int64(len(data))
+		if end > int64(len(fb.Data)) {
+			newData := make([]byte, end)
+			copy(newData, fb.Data)
+			fb.Data = newData
+		}
+
+		startPageIdx := relStart >> 12
+		endPageIdx := (end + PageSize - 1) >> 12
+
+		for pageIdx := startPageIdx; pageIdx < endPageIdx; pageIdx++ {
+			pageStart := pageIdx << 12
+			pageEnd := pageStart + PageSize
+
+			writeStart := max(pageStart, relStart)
+			writeEnd := min(pageEnd, end)
+			if writeEnd <= writeStart {
+				continue
+			}
+
+			// page index is relative to buffer (since relStart is relative)
+			if fb.Mask.IsDirtyPage(pageIdx) {
+				// already present/dirty: skip this page
+				continue
+			}
+
+			srcStart := int(writeStart - relStart)
+			dstStart := int(writeStart)
+			copy(fb.Data[dstStart:dstStart+int(writeEnd-writeStart)], data[srcStart:srcStart+int(writeEnd-writeStart)])
+			fb.Mask.smearPages(writeStart, writeEnd-writeStart)
+		}
+		return nil
+	}
+
+	// prepend case: incoming data starts before current base
+	prepend := int64(0 - relStart)
+	newLen := prepend + int64(len(fb.Data))
+	newData := make([]byte, newLen)
+	copy(newData[0:len(data)], data)
+	copy(newData[prepend:newLen], fb.Data)
+
+	fb.Mask = fb.Mask.shiftedRight(prepend, int64(len(newData)))
+	fb.Mask.smearPages(0, int64(len(data)))
+	fb.Base = offset
+	fb.Data = newData
+	return nil
+}
+
 func (fb *FileBuffer) Clear() {
 	fb.mu.Lock()
 	fb.Data = nil

@@ -2,6 +2,7 @@ package fs
 
 import (
 	"os"
+	"path"
 	"strings"
 
 	"github.com/mimic/internal/core/casters"
@@ -67,49 +68,78 @@ func (fs *FuseFS) Write(path string, buffer []byte, offset int64, file_handle ui
 		return -EACCES
 	}
 
-	file.AddToBuffer(offset, buffer)
-	end := offset + int64(len(buffer))
-	if file.stat != nil {
-		if end > file.stat.Size {
-			file.stat.Size = end
+	reqPageOffset, reqPageLen := helpers.PageAlignedRange(offset, int64(len(buffer)), file.remoteSize)
+	if reqPageOffset != offset || reqPageLen != int64(len(buffer)) && !file.buffer.DirtyRange(reqPageOffset, reqPageLen) {
+		fs.logger.Logf("[Write] adjusted write range for %s from offset=%d len=%d to offset=%d len=%d", path, offset, len(buffer), reqPageOffset, reqPageLen)
+		remoteBuf, err := fs.client.ReadRange(path, reqPageOffset, reqPageLen)
+		if err != nil && !helpers.IsNotExistErr(err) {
+			if helpers.IsForbiddenErr(err) {
+				fs.logger.Errorf("[Write] ReadRange forbidden for %s offset=%d len=%d: %v return EACCES", path, reqPageOffset, reqPageLen, err)
+				return -EACCES
+			}
+			fs.logger.Errorf("[Write] ReadRange error for %s offset=%d len=%d: %v returning EIO", path, reqPageOffset, reqPageLen, err)
+			return -EIO
+		}
+		if len(remoteBuf) > 0 {
+			file.AddRemoteToBuffer(reqPageOffset, remoteBuf)
 		}
 	}
 
-	// buf := file.CopyBuffer()
-	// fs.logger.Logf("[Write] buffer len=%d offset=%d, after write: path=%s base=%d len=%d dirty=%v", len(buffer), offset, path, buf.Base, len(buf.Data), file.IsDirty())
+	file.AddToBuffer(offset, buffer)
+	end := offset + int64(len(buffer))
+	if end > file.stat.Size {
+		file.stat.Size = end
+	}
+
+	buf := file.CopyBuffer()
+	fs.logger.Logf("[Write] buffer len=%d offset=%d, after write: path=%s base=%d len=%d dirty=%v", len(buffer), offset, path, buf.Base, len(buf.Data), file.IsDirty())
 
 	return len(buffer)
 }
 
-func (fs *FuseFS) Create(path string, flags int, mode uint32) (int, uint64) {
-	fs.logger.Logf("[Create]: path=%s flags=%#o mode=%#o", path, flags, mode)
-
-	if strings.HasSuffix(path, "/") && path != "/" {
-		path = strings.TrimSuffix(path, "/")
+func (fs *FuseFS) Create(p string, flags int, mode uint32) (int, uint64) {
+	if strings.HasSuffix(p, "/") && p != "/" {
+		p = strings.TrimSuffix(p, "/")
 	}
 
-	if err := fs.client.Create(path); err != nil {
+	if err := fs.client.Create(p); err != nil {
 		if os.IsPermission(err) || helpers.IsForbiddenErr(err) {
-			fs.logger.Errorf("[Create]: permission denied for path=%s returning EACCES", path)
+			fs.logger.Errorf("[Create]: permission denied for path=%s returning EACCES", p)
 			return -EACCES, 0
 		}
-		fs.logger.Errorf("[Create]: remote write failed path=%s err=%v returning EIO", path, err)
+		fs.logger.Errorf("[Create]: remote write failed path=%s err=%v returning EIO", p, err)
 		return -EIO, 0
 	}
 
-	h := uint64(0)
-	if fi, err := fs.client.Stat(path); err == nil {
-		h = fs.NewHandle(path, casters.FileInfoCast(fi), uint32(flags))
-	}
+	// synthesize Stat_t immediately so Create is one RPC (PUT)
+	isHidden := strings.HasPrefix(path.Base(p), ".")
+	stat := casters.EmptyFileStat(isHidden)
 
-	fs.logger.Logf("[Create]: returning handle=%d path=%s flags=%#o mode=%#o", h, path, flags, mode)
+	h := fs.NewHandle(p, stat, uint32(flags))
+
+	go func(h uint64, p string) {
+		fi, err := fs.client.Stat(p)
+		if err != nil {
+			return
+		}
+		fh, ok := fs.GetHandle(h)
+		if !ok {
+			return
+		}
+		fh.MLock()
+		fh.stat = casters.FileInfoCast(fi)
+		fh.remoteSize = fi.Size()
+		fh.MUnlock()
+	}(h, p)
+
+	fs.logger.Logf("[Create] returning handle=%d path=%s flags=%#o mode=%#o", h, p, flags, mode)
 	return 0, h
 }
 
 // Release should flush buffered segments (if any) to remote before closing.
 func (fs *FuseFS) Release(path string, file_handle uint64) (errc int) {
 	fs.logger.Logf("[Release] path=%s handle=%d", path, file_handle)
-	defer fs.handles.Delete(file_handle)
+	defer fs.ReleaseHandle(file_handle)
 	return 0
 }
 
@@ -215,56 +245,14 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 		return 0
 	}
 
-	// Snapshot dirty buffer (copy) and its base offset
 	buf := fh.CopyBuffer()
 
-	// If no dirty buffer, do a simple remote read
-	if !fh.IsDirty() || len(buf.Data) == 0 {
-		// if we know remote size and request starts beyond it -> EOF
-		if fh.stat != nil && reqStart >= fh.stat.Size {
-			return 0
-		}
-
-		reqPageStart, reqPageLen := helpers.PageAlignedRange(reqStart, reqLen, fh.remoteSize)
-
-		remoteBuf, err := fs.client.ReadRange(fh.Path(), reqPageStart, reqPageLen)
-		if err != nil {
-			if helpers.IsNotExistErr(err) {
-				return 0
-			} else if helpers.IsForbiddenErr(err) {
-				fs.logger.Errorf("[Read] ReadRange forbidden for %s offset=%d len=%d: %v return EACCES", path, reqStart, reqLen, err)
-				return -EACCES
-			}
-			fs.logger.Errorf("[Read] ReadRange error for %s offset=%d len=%d: %v", path, reqStart, reqPageLen, err)
-			return -EIO
-		}
-
-		// save fetched data into per-handle buffer so subsequent reads hit cache
-		if len(remoteBuf) > 0 {
-			fh.AddToBuffer(reqPageStart, remoteBuf)
-			// write fetched remote bytes into buffer, then mark clean (we didn't modify data)
-		}
-
-		// copy up to requested length
-		if int64(len(remoteBuf)) > reqLen {
-			remoteBuf = remoteBuf[:reqLen]
-		}
-		n := copy(buffer, remoteBuf)
-
-		fs.logger.Logf("[Read] clean (readahead=%d) for %s offset=%d(%d) len=%d(%d) returned %d bytes", len(remoteBuf), path, reqStart, reqPageStart, reqLen, reqPageLen, n)
-		return n
-	}
-
 	if buf.Mask.IsDirtyRange(reqStart, reqLen) {
-		dirtyBufRangeStart := max(reqStart-buf.Base, 0)
-		dirtyBufRangeEnd := min(dirtyBufRangeStart+reqLen, int64(len(buf.Data)))
-		n := copy(buffer, buf.Data[dirtyBufRangeStart:dirtyBufRangeEnd])
-		fs.logger.Logf("[Read] dirty buffer hit for %s offset=%d len=%d returned %d bytes", path, reqStart, reqLen, n)
-		return n
+		fs.logger.Logf("[Read] dirty buffer full hit for %s offset=%d len=%d", path, reqStart, reqLen)
+		goto merge
 	}
 
-	var remoteBuf []byte
-	if fh.stat != nil && reqStart <= fh.stat.Size {
+	if reqStart <= fh.remoteSize {
 		actualLen := min(reqLen, fh.remoteSize-reqStart)
 		if actualLen <= 0 {
 			goto merge
@@ -272,11 +260,11 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 
 		reqPageStart, reqPageLen := helpers.PageAlignedRange(reqStart, actualLen, fh.remoteSize)
 
-		var err error
-		remoteBuf, err = fs.client.ReadRange(fh.Path(), reqPageStart, reqPageLen)
+		remoteBuf, err := fs.client.ReadRange(fh.Path(), reqPageStart, reqPageLen)
 		if err == nil {
 			if len(remoteBuf) > 0 {
-				fh.AddToBuffer(reqPageStart, remoteBuf)
+				fs.logger.Logf("[Read] fetched remote data to fill buffer gap for %s offset=%d len=%d", path, reqPageStart, reqPageLen)
+				fh.AddRemoteToBuffer(reqPageStart, remoteBuf)
 			}
 			goto merge
 		}
@@ -293,11 +281,9 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 	}
 
 merge:
-	merged := helpers.MergeRemoteAndBuffer(remoteBuf, reqStart, buf.Data, buf.Base, buf.Mask, reqStart, int(reqLen))
-	// fs.logger.Logf("[Read] merged buffer for %s offset=%d len=%d remote_len=%d buf_len=%d merged_len=%d", path, reqStart, reqLen, len(remoteBuf), len(buf.Data), len(merged))
-	if len(merged) == 0 {
-		return 0
-	}
-	n := copy(buffer, merged)
+	dirtyBufRangeStart := max(reqStart-buf.Base, 0)
+	dirtyBufRangeEnd := min(dirtyBufRangeStart+reqLen, int64(len(buf.Data)))
+	n := copy(buffer, buf.Data[dirtyBufRangeStart:dirtyBufRangeEnd])
+
 	return n
 }

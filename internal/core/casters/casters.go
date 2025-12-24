@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/winfsp/cgofuse/fuse"
 )
@@ -18,6 +19,27 @@ func NormalizePath(p string) (string, error) {
 	s = strings.ReplaceAll(s, "\\", "/")
 	s = path.Clean(s)
 	return s, nil
+}
+
+func EmptyFileStat(hidden bool) *fuse.Stat_t {
+	uid, gid, _ := fuse.Getcontext()
+	Flags := uint32(0)
+	if hidden {
+		Flags = fuse.UF_HIDDEN
+	}
+	return &fuse.Stat_t{
+		Mode:     fuse.S_IFREG | 0o644,
+		Nlink:    1,
+		Size:     0,
+		Uid:      uid,
+		Gid:      gid,
+		Atim:     fuse.NewTimespec(time.Now()),
+		Mtim:     fuse.NewTimespec(time.Now()),
+		Ctim:     fuse.NewTimespec(time.Now()),
+		Blksize:  4096,
+		Birthtim: fuse.NewTimespec(time.Now()),
+		Flags:    Flags,
+	}
 }
 
 func FileInfoCast(f os.FileInfo) *fuse.Stat_t {
