@@ -54,6 +54,29 @@ func (m Mask) IsDirty(byteIndex int64) bool {
 	return (m[pageByteIndex] & pageMaskBitIndex) != 0
 }
 
+func (m *Mask) IsDirtyPage(pageIdx int64) bool {
+	pageMaskBitIndex, pageMaskByteIndex := pageIndexMask(pageIdx)
+	if pageMaskByteIndex >= len(*m) {
+		return false
+	}
+	return ((*m)[pageMaskByteIndex] & pageMaskBitIndex) != 0
+}
+
+func (m *Mask) IsDirtyRange(start, length int64) bool {
+	if length <= 0 {
+		return false
+	}
+
+	startPageIdx := start >> 12
+	endPageIdx := (start + length + PageSize - 1) >> 12
+	for pageIdx := startPageIdx; pageIdx < endPageIdx; pageIdx++ {
+		if !m.IsDirtyPage(pageIdx) {
+			return false
+		}
+	}
+	return true
+}
+
 func (m *Mask) clear() {
 	*m = nil
 }

@@ -4,7 +4,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mimic/internal/core/cache"
 	"github.com/mimic/internal/core/casters"
 	"github.com/mimic/internal/core/helpers"
 )
@@ -226,25 +225,9 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 			return 0
 		}
 
-		reqPageStart := reqStart - (reqStart % cache.PageSize)
-		reqPagesCount := (int64(len(buffer)) + (reqStart - reqPageStart) + cache.PageSize - 1) / cache.PageSize
-		readAheadLen := reqPagesCount * cache.PageSize
+		reqPageStart, reqPageLen := helpers.PageAlignedRange(reqStart, reqLen, fh.remoteSize)
 
-		// compute readahead length: at least requested length, at least READAHEAD_DEFAULT,
-		// but capped to READAHEAD_MAX and remote size when known
-		readAheadLen = min(max(readAheadLen, int64(READAHEAD_DEFAULT)), READAHEAD_MAX)
-		if fh.stat != nil {
-			// don't read past known remote end
-			if reqPageStart+readAheadLen > fh.remoteSize {
-				readAheadLen = max(fh.remoteSize-reqPageStart, 0)
-			}
-		}
-
-		if readAheadLen == 0 {
-			return 0
-		}
-
-		remoteBuf, err := fs.client.ReadRange(fh.Path(), reqPageStart, readAheadLen)
+		remoteBuf, err := fs.client.ReadRange(fh.Path(), reqPageStart, reqPageLen)
 		if err != nil {
 			if helpers.IsNotExistErr(err) {
 				return 0
@@ -252,27 +235,14 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 				fs.logger.Errorf("[Read] ReadRange forbidden for %s offset=%d len=%d: %v return EACCES", path, reqStart, reqLen, err)
 				return -EACCES
 			}
-			fs.logger.Errorf("[Read] ReadRange error for %s offset=%d len=%d: %v", path, reqStart, readAheadLen, err)
+			fs.logger.Errorf("[Read] ReadRange error for %s offset=%d len=%d: %v", path, reqStart, reqPageLen, err)
 			return -EIO
 		}
 
 		// save fetched data into per-handle buffer so subsequent reads hit cache
 		if len(remoteBuf) > 0 {
-			fh.MLock()
-			if fh.buffer == nil {
-				fh.buffer = &cache.FileBuffer{
-					BufferSnapshot: cache.BufferSnapshot{
-						Data: make([]byte, 0),
-						Base: 0,
-						Mask: cache.Mask(make([]byte, 0)),
-					},
-				}
-				fh.buffer.IncHandle()
-			}
+			fh.AddToBuffer(reqPageStart, remoteBuf)
 			// write fetched remote bytes into buffer, then mark clean (we didn't modify data)
-			_ = fh.buffer.WriteAt(reqStart, remoteBuf)
-			fh.buffer.MarkClean()
-			fh.MUnlock()
 		}
 
 		// copy up to requested length
@@ -281,7 +251,15 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 		}
 		n := copy(buffer, remoteBuf)
 
-		fs.logger.Logf("[Read] clean (readahead=%d) for %s offset=%d(%d) len=%d(%d) returned %d bytes", len(remoteBuf), path, reqStart, reqPageStart, reqLen, readAheadLen, n)
+		fs.logger.Logf("[Read] clean (readahead=%d) for %s offset=%d(%d) len=%d(%d) returned %d bytes", len(remoteBuf), path, reqStart, reqPageStart, reqLen, reqPageLen, n)
+		return n
+	}
+
+	if buf.Mask.IsDirtyRange(reqStart, reqLen) {
+		dirtyBufRangeStart := max(reqStart-buf.Base, 0)
+		dirtyBufRangeEnd := min(dirtyBufRangeStart+reqLen, int64(len(buf.Data)))
+		n := copy(buffer, buf.Data[dirtyBufRangeStart:dirtyBufRangeEnd])
+		fs.logger.Logf("[Read] dirty buffer hit for %s offset=%d len=%d returned %d bytes", path, reqStart, reqLen, n)
 		return n
 	}
 
@@ -292,9 +270,14 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 			goto merge
 		}
 
+		reqPageStart, reqPageLen := helpers.PageAlignedRange(reqStart, actualLen, fh.remoteSize)
+
 		var err error
-		remoteBuf, err = fs.client.ReadRange(fh.Path(), reqStart, actualLen)
+		remoteBuf, err = fs.client.ReadRange(fh.Path(), reqPageStart, reqPageLen)
 		if err == nil {
+			if len(remoteBuf) > 0 {
+				fh.AddToBuffer(reqPageStart, remoteBuf)
+			}
 			goto merge
 		}
 
