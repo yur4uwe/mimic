@@ -10,9 +10,10 @@ import (
 )
 
 type FileHandle struct {
-	path  string
-	flags flags.OpenFlag
-	stat  *fuselib.Stat_t
+	path       string
+	flags      flags.OpenFlag
+	stat       *fuselib.Stat_t
+	remoteSize int64
 
 	mu     sync.Mutex
 	buffer *cache.FileBuffer
@@ -20,9 +21,10 @@ type FileHandle struct {
 
 func NewFilehandle(path string, oflags flags.OpenFlag, stat *fuselib.Stat_t) *FileHandle {
 	return &FileHandle{
-		path:  path,
-		flags: oflags,
-		stat:  stat,
+		path:       path,
+		flags:      oflags,
+		stat:       stat,
+		remoteSize: stat.Size,
 	}
 }
 

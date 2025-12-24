@@ -12,7 +12,9 @@ import (
 
 const (
 	DEFAULT_BLOCK_SIZE = 4096
-	READ_LEN           = 1024 * 1024
+	// readahead defaults
+	READAHEAD_DEFAULT int64 = 8 * 1024  // 8 KB
+	READAHEAD_MAX     int64 = 64 * 1024 // 64 KB cap
 )
 
 func (fs *FuseFS) Getattr(p string, stat *fuselib.Stat_t, fh uint64) int {
