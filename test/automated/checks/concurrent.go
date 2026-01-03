@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	autotests "github.com/mimic/test/automated/declarations"
 )
 
 // CheckConcurrentAppendRead performs concurrent appends and a reader tailing the file.
@@ -34,13 +36,13 @@ func CheckConcurrentAppendRead(base string) (retErr error) {
 	go func() {
 		defer wg.Done()
 		log.Printf("[appendRoutine] start (n=%d)", n)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			f, err := os.OpenFile(fpath, os.O_WRONLY|os.O_APPEND, 0644)
 			if err != nil {
 				appendCh <- fmt.Errorf("open for append error: %v", err)
 				return
 			}
-			_, err = f.WriteString(fmt.Sprintf("x%02d\n", i))
+			_, err = fmt.Fprintf(f, "x%02d\n", i)
 			_ = f.Close()
 			if err != nil {
 				appendCh <- fmt.Errorf("write error: %v", err)
@@ -148,4 +150,127 @@ func summarizeSub(parent, name string, err error, dur time.Duration) {
 	} else {
 		log.Printf("[PASS] %s/%s: Check succeeded (took %s)", parent, name, dur)
 	}
+}
+
+func ConcurrentAppendtest(base string) *autotests.AutoTestResult {
+	res := &autotests.AutoTestResult{
+		Name:   "Concurrent Append/Read Test",
+		Passed: false,
+	}
+
+	f, err := os.OpenFile(base, os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		res.Error = fmt.Errorf("open for append error: %v", err)
+		return res
+	}
+	defer f.Close()
+
+	for i := range 5 {
+		_, err = fmt.Fprintf(f, "x%02d\n", i)
+		if err != nil {
+			res.Error = fmt.Errorf("write error: %v", err)
+			return res
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	res.Passed = true
+	return res
+}
+
+func ConcurrentReadtest(base string) *autotests.AutoTestResult {
+	res := &autotests.AutoTestResult{
+		Name:   "Concurrent Read Test",
+		Passed: false,
+	}
+	seen := 0
+	var last int64 = 0
+	for seen < 5 {
+		info, err := os.Stat(base)
+		if err != nil {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		// check if file size has increased
+		if info.Size() > last {
+			f, err := os.Open(base)
+			if err != nil {
+				res.Error = err
+				return res
+			}
+			// seek to last read position
+			if _, err := f.Seek(last, io.SeekStart); err != nil {
+				res.Error = err
+				return res
+			}
+			toRead := int(info.Size() - last)
+			if toRead <= 0 {
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
+			// read new data
+			buf := make([]byte, toRead)
+			nread, err := f.Read(buf)
+			if err != nil && err != io.EOF {
+				res.Error = err
+				return res
+			}
+			if nread > 0 {
+				parts := bytes.Split(buf[:nread], []byte{'\n'})
+				for _, p := range parts {
+					if len(p) > 0 {
+						seen++
+					}
+				}
+				last += int64(nread)
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	res.Passed = true
+	return res
+}
+
+func CheckConcurrentTest(base string) *autotests.AutoTestResult {
+	res := &autotests.AutoTestResult{
+		Name:   "Concurrent Append/Read Test",
+		Passed: false,
+	}
+
+	fpath := base + ".concurrent"
+
+	prep := autotests.PrepareFileForTest(fpath, (&autotests.FilePreparationOptions{}).RequestedBy("ConcurrentAppendRead"))
+	res.Children = append(res.Children, prep)
+	if !prep.Passed {
+		return res
+	}
+
+	defer func() {
+		_ = os.RemoveAll(fpath)
+	}()
+
+	var wg sync.WaitGroup
+	appendResChan := make(chan *autotests.AutoTestResult, 1)
+	readResChan := make(chan *autotests.AutoTestResult, 1)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		appendResChan <- autotests.Timer(fpath, ConcurrentAppendtest)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		readResChan <- autotests.Timer(fpath, ConcurrentReadtest)
+	}()
+
+	wg.Wait()
+	close(appendResChan)
+	close(readResChan)
+
+	res.Children = append(res.Children, <-appendResChan, <-readResChan)
+
+	res.Passed = true
+	return res
 }

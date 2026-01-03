@@ -22,6 +22,15 @@ type FilePreparationOptions struct {
 	Requester string
 }
 
+func NewFilePreparationOptions() *FilePreparationOptions {
+	return &FilePreparationOptions{
+		Size:      0,
+		Data:      nil,
+		Collect:   false,
+		Requester: "default",
+	}
+}
+
 func (fpo *FilePreparationOptions) WithData(data []byte) *FilePreparationOptions {
 	fpo.Data = data
 	fpo.Size = len(data)

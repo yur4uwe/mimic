@@ -61,13 +61,16 @@ func main() {
 
 	fmt.Println("Mountpoint is accessible.")
 
-	runCheck("File operations", autochecks.CheckFileOps, mount)
+	// runCheck("File operations", autochecks.CheckFileOps, mount)
+	runTest(autochecks.CheckFileOpsTest, mount)
 	// runCheck("Large write", autochecks.CheckLargeWrite, mount)
 	runTest(autochecks.CheckLargeWriteTest, mount)
-	runCheck("Open flags", autochecks.CheckOpenFlags, mount)
+	// runCheck("Open flags", autochecks.CheckOpenFlags, mount)
+	runTest(autochecks.CheckOpenFlagsTest, mount)
 	// runCheck("Truncate", autochecks.CheckTruncate, mount)
 	runTest(autochecks.CheckTruncateTest, mount)
-	runCheck("Concurrent append/read", autochecks.CheckConcurrentAppendRead, mount)
+	// runCheck("Concurrent append/read", autochecks.CheckConcurrentAppendRead, mount)
+	runTest(autochecks.CheckConcurrentTest, mount)
 
 	fmt.Println("Unmounting...")
 	time.Sleep(50 * time.Millisecond)
