@@ -8,7 +8,8 @@ const (
 	ENOENT  = 2
 	EIO     = 5
 	EACCES  = 13
-	ENOTDIR = 20
 	EEXIST  = 17
+	ENOTDIR = 20
+	EINVAL  = 22
 	ENOSYS  = 38
 )

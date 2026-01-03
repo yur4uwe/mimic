@@ -2,6 +2,7 @@ package fs
 
 import (
 	"os"
+	"strings"
 
 	"github.com/mimic/internal/core/casters"
 	"github.com/mimic/internal/core/checks"
@@ -114,6 +115,10 @@ func (fs *FuseFS) Rename(oldPath string, newPath string) int {
 
 	err := fs.client.Rename(oldPath, newPath)
 	if err != nil {
+		if strings.Contains(err.Error(), "400") {
+			fs.logger.Errorf("[Rename] rename bad request from %s to %s: %v returning EINVAL", oldPath, newPath, err)
+			return -EINVAL
+		}
 		fs.logger.Errorf("[Rename] rename error from %s to %s: %v returning EIO", oldPath, newPath, err)
 		return -EIO
 	}

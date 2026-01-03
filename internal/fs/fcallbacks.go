@@ -3,6 +3,7 @@ package fs
 import (
 	"os"
 	"path"
+	"runtime/debug"
 	"strings"
 
 	"github.com/mimic/internal/core/casters"
@@ -91,8 +92,8 @@ func (fs *FuseFS) Write(path string, buffer []byte, offset int64, file_handle ui
 		file.stat.Size = end
 	}
 
-	buf := file.CopyBuffer()
-	fs.logger.Logf("[Write] buffer len=%d offset=%d, after write: path=%s base=%d len=%d dirty=%v", len(buffer), offset, path, buf.Base, len(buf.Data), file.IsDirty())
+	// buf := file.CopyBuffer()
+	// fs.logger.Logf("[Write] buffer len=%d offset=%d, after write: path=%s base=%d len=%d dirty=%v", len(buffer), offset, path, buf.Base, len(buf.Data), file.IsDirty())
 
 	return len(buffer)
 }
@@ -231,6 +232,12 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 		return -EACCES
 	}
 
+	defer func() {
+		if r := recover(); r != nil {
+			fs.logger.Errorf("[Read] panic: %v\n%s", r, debug.Stack())
+		}
+	}()
+
 	// 1. Check dirty buffer for overlapping pages
 	// 2. Fetch remote state for file on buffer miss
 	// 3. Merge with letting buffer override
@@ -248,7 +255,7 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 	buf := fh.CopyBuffer()
 
 	if buf.Mask.IsDirtyRange(reqStart, reqLen) {
-		fs.logger.Logf("[Read] dirty buffer full hit for %s offset=%d len=%d", path, reqStart, reqLen)
+		// fs.logger.Logf("[Read] dirty buffer full hit for %s offset=%d len=%d", path, reqStart, reqLen)
 		goto merge
 	}
 
@@ -263,7 +270,7 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 		remoteBuf, err := fs.client.ReadRange(fh.path, reqPageStart, reqPageLen)
 		if err == nil {
 			if len(remoteBuf) > 0 {
-				fs.logger.Logf("[Read] fetched remote data to fill buffer gap for %s offset=%d(pre-align=%d) len=%d(pre-align=%d)", path, reqPageStart, reqStart, reqPageLen, actualLen)
+				// fs.logger.Logf("[Read] fetched remote data to fill buffer gap for %s offset=%d(pre-align=%d) len=%d(pre-align=%d)", path, reqPageStart, reqStart, reqPageLen, actualLen)
 				fh.AddRemoteToBuffer(reqPageStart, remoteBuf)
 			}
 			goto merge
@@ -281,9 +288,30 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 	}
 
 merge:
-	dirtyBufRangeStart := max(reqStart-buf.Base, 0)
-	dirtyBufRangeEnd := min(dirtyBufRangeStart+reqLen, int64(len(buf.Data)))
-	n := copy(buffer, buf.Data[dirtyBufRangeStart:dirtyBufRangeEnd])
+	buf = fh.CopyBuffer()
 
+	if len(buf.Data) == 0 {
+		fs.logger.Logf("[Read] empty buffer snapshot for %s base=%d reqStart=%d reqLen=%d — returning 0", path, buf.Base, reqStart, reqLen)
+		return 0
+	}
+
+	dataLen := int64(len(buf.Data))
+	start := max(reqStart-buf.Base, 0)
+	if start >= dataLen {
+		return 0
+	}
+
+	end := min(start+reqLen, dataLen)
+
+	if end <= start {
+		fs.logger.Errorf("[Read] computed empty/invalid range for %s: start=%d end=%d dataLen=%d reqLen=%d base=%d", path, start, end, dataLen, reqLen, buf.Base)
+		return -EIO
+	}
+
+	// safe int conversion for slice indices
+	sStart := int(start)
+	sEnd := int(end)
+
+	n := copy(buffer, buf.Data[sStart:sEnd])
 	return n
 }

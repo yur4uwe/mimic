@@ -3,12 +3,33 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	autochecks "github.com/mimic/test/automated/checks"
+	autotests "github.com/mimic/test/automated/declarations"
 )
 
 type checkFunc func(string) error
+
+func runTest(fn func(string) *autotests.AutoTestResult, mount string) {
+	res := autotests.Timer(mount, fn)
+	UnwrapResult(res, 0)
+}
+
+func UnwrapResult(res *autotests.AutoTestResult, depth int) {
+	if res.Passed {
+		fmt.Printf("%s[PASS] %s (took %s)\n", strings.Repeat("  ", depth), res.Name, res.Duration)
+	} else {
+		fmt.Printf("%s[FAIL] %s: Error encountered: %v (took %s)\n", strings.Repeat("  ", depth), res.Name, res.Error, res.Duration)
+	}
+	if len(res.Children) == 0 {
+		return
+	}
+	for _, child := range res.Children {
+		UnwrapResult(child, depth+1)
+	}
+}
 
 func runCheck(name string, fn checkFunc, mount string) {
 	start := time.Now()
@@ -41,9 +62,11 @@ func main() {
 	fmt.Println("Mountpoint is accessible.")
 
 	runCheck("File operations", autochecks.CheckFileOps, mount)
-	runCheck("Large write", autochecks.CheckLargeWrite, mount)
+	// runCheck("Large write", autochecks.CheckLargeWrite, mount)
+	runTest(autochecks.CheckLargeWriteTest, mount)
 	runCheck("Open flags", autochecks.CheckOpenFlags, mount)
-	runCheck("Truncate", autochecks.CheckTruncate, mount)
+	// runCheck("Truncate", autochecks.CheckTruncate, mount)
+	runTest(autochecks.CheckTruncateTest, mount)
 	runCheck("Concurrent append/read", autochecks.CheckConcurrentAppendRead, mount)
 
 	fmt.Println("Unmounting...")
