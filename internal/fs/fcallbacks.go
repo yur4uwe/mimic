@@ -70,7 +70,7 @@ func (fs *FuseFS) Write(path string, buffer []byte, offset int64, file_handle ui
 	}
 
 	reqPageOffset, reqPageLen := file.PageAlignedRange(offset, int64(len(buffer)))
-	if reqPageOffset != offset || reqPageLen != int64(len(buffer)) && !file.buffer.DirtyRange(reqPageOffset, reqPageLen) {
+	if (reqPageOffset != offset || reqPageLen != int64(len(buffer))) && !file.buffer.DirtyRange(reqPageOffset, reqPageLen) {
 		fs.logger.Logf("[Write] adjusted write range for %s from offset=%d len=%d to offset=%d len=%d", path, offset, len(buffer), reqPageOffset, reqPageLen)
 		remoteBuf, err := fs.client.ReadRange(path, reqPageOffset, reqPageLen)
 		if err != nil && !helpers.IsNotExistErr(err) {

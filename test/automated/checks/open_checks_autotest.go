@@ -80,10 +80,10 @@ func checkO_APPEND_new(fpath string) error {
 	if err != nil {
 		return fmt.Errorf("readfile failed after O_APPEND: %w", err)
 	}
-	if !bytes.HasSuffix(b, []byte("A")) {
+	if !bytes.Equal(b, []byte("BASEA")) {
 		return fmt.Errorf("O_APPEND verification failed: content=%q", b)
 	}
-	// expect baseline + 1; caller should prepare baseline as needed
+
 	return nil
 }
 

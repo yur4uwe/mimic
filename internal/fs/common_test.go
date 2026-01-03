@@ -16,6 +16,14 @@ func TestPageAlignedRange(t *testing.T) {
 		RemoteSize int64
 	}{
 		{
+			name:       "Non-aligned read, very small request",
+			InOffset:   4,
+			InLength:   1,
+			RemoteSize: 4,
+			OutOffset:  0,
+			OutLength:  64 * 1024, // READAHEAD_DEFAULT minimum (64 KiB)
+		},
+		{
 			name:       "Aligned read, remote large",
 			InOffset:   8192,
 			InLength:   4096,
