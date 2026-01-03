@@ -1,6 +1,10 @@
-package helpers
+package fs
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/mimic/internal/core/flags"
+)
 
 func TestPageAlignedRange(t *testing.T) {
 	tests := []struct {
@@ -62,9 +66,12 @@ func TestPageAlignedRange(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			outOffset, outLength := PageAlignedRange(tt.InOffset, tt.InLength, tt.RemoteSize)
+			fh := NewFilehandle("/tmp/f", flags.OpenFlag(0), nil)
+			fh.remoteSize = tt.RemoteSize
+			outOffset, outLength := fh.PageAlignedRange(tt.InOffset, tt.InLength)
 			if outOffset != tt.OutOffset {
 				t.Fatalf("%s: expected OutOffset %d, got %d", tt.name, tt.OutOffset, outOffset)
 			}
@@ -72,5 +79,20 @@ func TestPageAlignedRange(t *testing.T) {
 				t.Fatalf("%s: expected OutLength %d, got %d", tt.name, tt.OutLength, outLength)
 			}
 		})
+	}
+}
+
+func TestPageAlignedRangeGrowth(t *testing.T) {
+	fh := NewFilehandle("/tmp/f", flags.OpenFlag(0), nil)
+	// large remote to avoid clipping
+	fh.remoteSize = 10 * 1024 * 1024
+
+	// Simulate a previous large read to trigger the growth branch.
+	fh.lastReadSize = 128 * 1024 // 128 KiB
+
+	_, outLen := fh.PageAlignedRange(0, 4096)
+	want := int64(128*1024) * 2
+	if outLen != want {
+		t.Fatalf("growth: expected OutLength %d, got %d", want, outLen)
 	}
 }

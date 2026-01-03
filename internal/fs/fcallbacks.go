@@ -17,8 +17,8 @@ func (fs *FuseFS) Truncate(p string, size int64, fh uint64) int {
 	}
 
 	file, ok := fs.GetHandle(fh)
-	if ok && file != nil && !file.Flags().WriteAllowed() {
-		fs.logger.Errorf("[Truncate] access denied for %s, flag state: %+v return EACCES", p, file.Flags())
+	if ok && file != nil && !file.flags.WriteAllowed() {
+		fs.logger.Errorf("[Truncate] access denied for %s, flag state: %+v return EACCES", p, file.flags)
 		return -EACCES
 	}
 
@@ -63,12 +63,12 @@ func (fs *FuseFS) Write(path string, buffer []byte, offset int64, file_handle ui
 		return -EIO
 	}
 
-	if !file.Flags().WriteAllowed() {
-		fs.logger.Errorf("[Write] access denied for %s, flag state: %+v returning EACCES", path, file.Flags())
+	if !file.flags.WriteAllowed() {
+		fs.logger.Errorf("[Write] access denied for %s, flag state: %+v returning EACCES", path, file.flags)
 		return -EACCES
 	}
 
-	reqPageOffset, reqPageLen := helpers.PageAlignedRange(offset, int64(len(buffer)), file.remoteSize)
+	reqPageOffset, reqPageLen := file.PageAlignedRange(offset, int64(len(buffer)))
 	if reqPageOffset != offset || reqPageLen != int64(len(buffer)) && !file.buffer.DirtyRange(reqPageOffset, reqPageLen) {
 		fs.logger.Logf("[Write] adjusted write range for %s from offset=%d len=%d to offset=%d len=%d", path, offset, len(buffer), reqPageOffset, reqPageLen)
 		remoteBuf, err := fs.client.ReadRange(path, reqPageOffset, reqPageLen)
@@ -154,33 +154,33 @@ func (fs *FuseFS) Flush(path string, file_handle uint64) (errc int) {
 		return 0
 	}
 
-	if !fh.Flags().WriteAllowed() {
+	if !fh.flags.WriteAllowed() {
 		return 0
 	}
 
 	fh.MLock()
 	defer fh.MUnlock()
 	buf := fh.CopyBuffer()
-	fs.logger.Logf("[Flush] about to write path=%s buffer_len=%d buffer_off=%d", fh.Path(), len(buf.Data), buf.Base)
-	if err := fs.client.WriteOffset(fh.Path(), buf.Data, buf.Base); err != nil {
+	fs.logger.Logf("[Flush] about to write path=%s buffer_len=%d buffer_off=%d", fh.path, len(buf.Data), buf.Base)
+	if err := fs.client.WriteOffset(fh.path, buf.Data, buf.Base); err != nil {
 		if helpers.IsForbiddenErr(err) {
-			fs.logger.Logf("[Flush] WriteOffset forbidden for %s: %v; returning EACCES", fh.Path(), err)
+			fs.logger.Logf("[Flush] WriteOffset forbidden for %s: %v; returning EACCES", fh.path, err)
 			return -EACCES
 		}
-		if helpers.IsNotExistErr(err) && fh.Flags().Create() {
+		if helpers.IsNotExistErr(err) && fh.flags.Create() {
 			end := buf.Base + int64(len(buf.Data))
 			if end > int64(^uint(0)>>1) {
-				fs.logger.Logf("[Flush] too large allocate for %s; returning EIO", fh.Path())
+				fs.logger.Logf("[Flush] too large allocate for %s; returning EIO", fh.path)
 				return -EIO
 			}
 			full := make([]byte, int(end))
 			copy(full[int(buf.Base):], buf.Data)
-			if werr := fs.client.Write(fh.Path(), full); werr != nil {
-				fs.logger.Logf("[Flush] Write error for %s: %v; returning EIO", fh.Path(), werr)
+			if werr := fs.client.Write(fh.path, full); werr != nil {
+				fs.logger.Logf("[Flush] Write error for %s: %v; returning EIO", fh.path, werr)
 				return -EIO
 			}
 		} else {
-			fs.logger.Logf("[Flush] WriteOffset error for %s: %v; returning EIO", fh.Path(), err)
+			fs.logger.Logf("[Flush] WriteOffset error for %s: %v; returning EIO", fh.path, err)
 			return -EIO
 		}
 	}
@@ -226,8 +226,8 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 		return -EIO
 	}
 
-	if !fh.Flags().ReadAllowed() {
-		fs.logger.Errorf("[Read] access denied for %s, flag state: %+v returning EACCES", path, fh.Flags())
+	if !fh.flags.ReadAllowed() {
+		fs.logger.Errorf("[Read] access denied for %s, flag state: %+v returning EACCES", path, fh.flags)
 		return -EACCES
 	}
 
@@ -258,12 +258,12 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 			goto merge
 		}
 
-		reqPageStart, reqPageLen := helpers.PageAlignedRange(reqStart, actualLen, fh.remoteSize)
+		reqPageStart, reqPageLen := fh.PageAlignedRange(reqStart, actualLen)
 
-		remoteBuf, err := fs.client.ReadRange(fh.Path(), reqPageStart, reqPageLen)
+		remoteBuf, err := fs.client.ReadRange(fh.path, reqPageStart, reqPageLen)
 		if err == nil {
 			if len(remoteBuf) > 0 {
-				fs.logger.Logf("[Read] fetched remote data to fill buffer gap for %s offset=%d len=%d", path, reqPageStart, reqPageLen)
+				fs.logger.Logf("[Read] fetched remote data to fill buffer gap for %s offset=%d(pre-align=%d) len=%d(pre-align=%d)", path, reqPageStart, reqStart, reqPageLen, actualLen)
 				fh.AddRemoteToBuffer(reqPageStart, remoteBuf)
 			}
 			goto merge

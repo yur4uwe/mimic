@@ -9,11 +9,18 @@ import (
 	fuselib "github.com/winfsp/cgofuse/fuse"
 )
 
+const (
+	READAHEAD_DEFAULT int64 = 64 * 1024
+	READAHEAD_MAX     int64 = 4 * 1024 * 1024
+)
+
 type FileHandle struct {
-	path       string
-	flags      flags.OpenFlag
-	stat       *fuselib.Stat_t
-	remoteSize int64
+	path  string
+	flags flags.OpenFlag
+	stat  *fuselib.Stat_t
+
+	remoteSize   int64
+	lastReadSize int64
 
 	mu     sync.Mutex
 	buffer *cache.FileBuffer
@@ -95,12 +102,24 @@ func (fh *FileHandle) IsDirty() bool {
 	return fh.buffer != nil && fh.buffer.Dirty
 }
 
-func (fh *FileHandle) Flags() flags.OpenFlag {
-	return fh.flags
-}
+func (fh *FileHandle) PageAlignedRange(offset, length int64) (int64, int64) {
+	reqPageStart := offset - (offset % cache.PageSize)
+	reqPagesCount := (length + (offset - reqPageStart) + cache.PageSize - 1) / cache.PageSize
+	readAheadLen := reqPagesCount * cache.PageSize
 
-func (fh *FileHandle) Path() string {
-	return fh.path
+	readAheadLen = max(readAheadLen, READAHEAD_DEFAULT)
+	if fh.lastReadSize != 0 && readAheadLen < fh.lastReadSize*2 {
+		readAheadLen = fh.lastReadSize * 2
+	}
+	readAheadLen = min(readAheadLen, READAHEAD_MAX)
+
+	fh.lastReadSize = readAheadLen
+
+	if reqPageStart+readAheadLen > fh.remoteSize {
+		readAheadLen = max(fh.remoteSize-reqPageStart, 0)
+	}
+
+	return reqPageStart, readAheadLen
 }
 
 func (fs *FuseFS) NewHandle(path string, stat *fuselib.Stat_t, oflags uint32) uint64 {
