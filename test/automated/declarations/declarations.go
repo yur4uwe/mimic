@@ -7,12 +7,31 @@ import (
 	"time"
 )
 
+type TestResultState uint8
+
+const (
+	TestPassed TestResultState = iota
+	TestFailed
+	TestSkipped
+	TestChildFailed
+)
+
 type AutoTestResult struct {
 	Name     string
-	Passed   bool
+	State    TestResultState
 	Error    error
 	Duration time.Duration
 	Children []*AutoTestResult
+}
+
+func (atr *AutoTestResult) AddChildResultAndContinue(child *AutoTestResult) bool {
+	atr.Children = append(atr.Children, child)
+	if child.State == TestFailed {
+		atr.State = TestChildFailed
+		atr.Error = fmt.Errorf("child %s failed: %w", child.Name, child.Error)
+		return false
+	}
+	return true
 }
 
 type FilePreparationOptions struct {
@@ -32,6 +51,9 @@ func NewFilePreparationOptions() *FilePreparationOptions {
 }
 
 func (fpo *FilePreparationOptions) WithData(data []byte) *FilePreparationOptions {
+	if data == nil {
+		return fpo
+	}
 	fpo.Data = data
 	fpo.Size = len(data)
 	return fpo
@@ -61,8 +83,8 @@ func PrepareFileForTest(path string, optsArr ...*FilePreparationOptions) *AutoTe
 	}
 
 	res := &AutoTestResult{
-		Name:   "PrepareFileForTest for " + opts.Requester,
-		Passed: true,
+		Name:  "PrepareFileForTest for " + opts.Requester,
+		State: TestFailed,
 	}
 	start := time.Now()
 
@@ -71,12 +93,12 @@ func PrepareFileForTest(path string, optsArr ...*FilePreparationOptions) *AutoTe
 	}()
 
 	if err := os.WriteFile(path, opts.Data, 0644); err != nil {
-		res.Passed = false
 		res.Error = err
 		_ = os.Remove(path)
 		return res
 	}
 
+	res.State = TestPassed
 	return res
 }
 
@@ -86,14 +108,13 @@ func Timer(mountPath string, testCallback func(string) *AutoTestResult) *AutoTes
 	start := time.Now()
 
 	res := &AutoTestResult{
-		Passed: true,
+		State: TestFailed,
 	}
 
 	defer func() {
 		res.Duration = time.Since(start)
 		if r := recover(); r != nil {
-			res.Passed = false
-			res.Error = fmt.Errorf("panic: %v\n%s", r, debug.Stack())
+			res.Error = fmt.Errorf("panic: %vn%s", r, debug.Stack())
 		}
 	}()
 
@@ -103,7 +124,7 @@ func Timer(mountPath string, testCallback func(string) *AutoTestResult) *AutoTes
 	}
 
 	res.Name = inner.Name
-	res.Passed = inner.Passed
+	res.State = inner.State
 	res.Error = inner.Error
 	res.Children = inner.Children
 

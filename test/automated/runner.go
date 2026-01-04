@@ -12,35 +12,39 @@ import (
 
 type checkFunc func(string) error
 
-func runTest(fn func(string) *autotests.AutoTestResult, mount string) {
-	res := autotests.Timer(mount, fn)
-	UnwrapResult(res, 0)
+type TestResultAggregate struct {
+	Passed   uint
+	Skipped  uint
+	Failed   uint
+	Duration time.Duration
 }
 
-func UnwrapResult(res *autotests.AutoTestResult, depth int) {
-	if res.Passed {
-		fmt.Printf("%s[PASS] %s (took %s)\n", strings.Repeat("  ", depth), res.Name, res.Duration)
-	} else {
-		fmt.Printf("%s[FAIL] %s: Error encountered: %v (took %s)\n", strings.Repeat("  ", depth), res.Name, res.Error, res.Duration)
+func UnwrapResult(res *autotests.AutoTestResult, aggr *TestResultAggregate, depth int) {
+	if aggr == nil {
+		panic("aggr cannot be nil")
 	}
+
+	switch res.State {
+	case autotests.TestPassed:
+		fmt.Printf("%s[PASS] %s (took %s)\n", strings.Repeat("  ", depth), res.Name, res.Duration)
+		aggr.Passed++
+	case autotests.TestSkipped:
+		fmt.Printf("%s[SKIP] %s (took %s)\n", strings.Repeat("  ", depth), res.Name, res.Duration)
+		aggr.Skipped++
+	case autotests.TestFailed:
+		fmt.Printf("%s[FAIL] %s: Error encountered: %v (took %s)\n", strings.Repeat("  ", depth), res.Name, res.Error, res.Duration)
+		aggr.Failed++
+	case autotests.TestChildFailed:
+		fmt.Printf("%s[FAIL] %s: One or more child tests failed (took %s)\n", strings.Repeat("  ", depth), res.Name, res.Duration)
+	default:
+		panic("unknown test result state")
+	}
+	aggr.Duration += res.Duration
 	if len(res.Children) == 0 {
 		return
 	}
 	for _, child := range res.Children {
-		UnwrapResult(child, depth+1)
-	}
-}
-
-func runCheck(name string, fn checkFunc, mount string) {
-	start := time.Now()
-
-	err := fn(mount)
-
-	dur := time.Since(start)
-	if err != nil {
-		fmt.Printf("[FAIL] %s: Error encountered: %v (took %s)\n", name, err, dur)
-	} else {
-		fmt.Printf("[PASS] %s: Check succeeded (took %s)\n", name, dur)
+		UnwrapResult(child, aggr, depth+1)
 	}
 }
 
@@ -61,17 +65,20 @@ func main() {
 
 	fmt.Println("Mountpoint is accessible.")
 
-	// runCheck("File operations", autochecks.CheckFileOps, mount)
-	runTest(autochecks.CheckFileOpsTest, mount)
-	// runCheck("Large write", autochecks.CheckLargeWrite, mount)
-	runTest(autochecks.CheckLargeWriteTest, mount)
-	// runCheck("Open flags", autochecks.CheckOpenFlags, mount)
-	runTest(autochecks.CheckOpenFlagsTest, mount)
-	// runCheck("Truncate", autochecks.CheckTruncate, mount)
-	runTest(autochecks.CheckTruncateTest, mount)
-	// runCheck("Concurrent append/read", autochecks.CheckConcurrentAppendRead, mount)
-	runTest(autochecks.CheckConcurrentTest, mount)
+	aggregate := &TestResultAggregate{}
 
-	fmt.Println("Unmounting...")
+	for _, callback := range []func(string) *autotests.AutoTestResult{
+		autochecks.CheckFileOpsTest,
+		autochecks.CheckLargeWriteTest,
+		autochecks.CheckOpenFlagsTest,
+		autochecks.CheckTruncateTest,
+		autochecks.CheckConcurrentTest,
+	} {
+		r := autotests.Timer(mount, callback)
+		UnwrapResult(r, aggregate, 0)
+	}
+
+	fmt.Printf("\nSummary: %d passed, %d skipped, %d failed, total time %s\n", aggregate.Passed, aggregate.Skipped, aggregate.Failed, aggregate.Duration)
+
 	time.Sleep(50 * time.Millisecond)
 }

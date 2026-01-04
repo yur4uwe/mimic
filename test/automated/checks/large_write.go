@@ -13,14 +13,15 @@ import (
 
 func CheckLargeWriteTest(base string) *autotests.AutoTestResult {
 	res := &autotests.AutoTestResult{
-		Name:   "CheckLargeWriteTest",
-		Passed: false,
+		Name:  "CheckLargeWriteTest",
+		State: autotests.TestFailed,
 	}
 
 	baseFName := path.Join(base, "largefile.largewrite")
 	opts := &autotests.FilePreparationOptions{}
 	prep := autotests.PrepareFileForTest(baseFName, opts.RequestedBy("Large Write"))
-	if !prep.Passed {
+	if prep.State == autotests.TestFailed {
+		res.State = autotests.TestChildFailed
 		res.Error = fmt.Errorf("file preparation failed: %w", prep.Error)
 		return res
 	}
@@ -31,14 +32,15 @@ func CheckLargeWriteTest(base string) *autotests.AutoTestResult {
 	}()
 
 	largeWriteRes := autotests.Timer(baseFName, LargeWriteTest)
-	if !largeWriteRes.Passed {
+	if largeWriteRes.State == autotests.TestFailed {
+
 		res.Error = fmt.Errorf("large write test failed: %w", largeWriteRes.Error)
 		return res
 	}
 	res.Children = append(res.Children, largeWriteRes)
 
 	largeSizeRes := autotests.Timer(baseFName, LargeFileSizeTest)
-	if !largeSizeRes.Passed {
+	if largeSizeRes.State == autotests.TestFailed {
 		res.Error = fmt.Errorf("large file size test failed: %w", largeSizeRes.Error)
 		return res
 	}
@@ -51,20 +53,20 @@ func CheckLargeWriteTest(base string) *autotests.AutoTestResult {
 			return ChunkedReadTest(p, sz)
 		})
 		res.Children = append(res.Children, chunkedReadRes)
-		if !chunkedReadRes.Passed {
+		if chunkedReadRes.State == autotests.TestFailed {
 			res.Error = fmt.Errorf("chunked read test (size %d) failed: %w", sz, chunkedReadRes.Error)
 			return res
 		}
 	}
 
-	res.Passed = true
+	res.State = autotests.TestPassed
 	return res
 }
 
 func LargeWriteTest(base string) *autotests.AutoTestResult {
 	res := &autotests.AutoTestResult{
-		Name:   "large write",
-		Passed: false,
+		Name:  "large write",
+		State: autotests.TestFailed,
 	}
 	data := bytes.Repeat([]byte{0}, 1024*1024) // 1 MiB
 
@@ -83,14 +85,14 @@ func LargeWriteTest(base string) *autotests.AutoTestResult {
 		}
 	}
 
-	res.Passed = true
+	res.State = autotests.TestPassed
 	return res
 }
 
 func LargeFileSizeTest(base string) *autotests.AutoTestResult {
 	res := &autotests.AutoTestResult{
-		Name:   "large file size check",
-		Passed: false,
+		Name:  "large file size check",
+		State: autotests.TestFailed,
 	}
 
 	retries := 5
@@ -112,14 +114,14 @@ sizeCheck:
 		return res
 	}
 
-	res.Passed = true
+	res.State = autotests.TestPassed
 	return res
 }
 
 func ChunkedReadTest(base string, chunkSize int) *autotests.AutoTestResult {
 	res := &autotests.AutoTestResult{
-		Name:   fmt.Sprintf("chunked read %d", chunkSize),
-		Passed: false,
+		Name:  fmt.Sprintf("chunked read %d", chunkSize),
+		State: autotests.TestFailed,
 	}
 
 	f, err := os.Open(base)
@@ -150,7 +152,7 @@ func ChunkedReadTest(base string, chunkSize int) *autotests.AutoTestResult {
 			return res
 		}
 	}
-	res.Passed = true
+	res.State = autotests.TestPassed
 	return res
 }
 
@@ -199,7 +201,7 @@ retryCheck:
 		goto cleanup
 	}
 	if info.Size() < 10*1024*1024 {
-		fmt.Printf("Incorrect size %d, trying again\n", info.Size())
+		fmt.Printf("Incorrect size %d, trying againn", info.Size())
 		if retries == 0 {
 			retErr = fmt.Errorf("failed to correctly stat a file after 5 tries")
 			summarizeSub("Large write", "stat", retErr, time.Since(s))
@@ -211,7 +213,7 @@ retryCheck:
 	}
 	summarizeSub("Large write", "stat", nil, time.Since(s))
 
-	fmt.Printf("Succeeded after %d retries\n", 5-retries+1)
+	fmt.Printf("Succeeded after %d retriesn", 5-retries+1)
 
 	// read-back checks with different chunk sizes (small and large)
 

@@ -42,7 +42,7 @@ func CheckConcurrentAppendRead(base string) (retErr error) {
 				appendCh <- fmt.Errorf("open for append error: %v", err)
 				return
 			}
-			_, err = fmt.Fprintf(f, "x%02d\n", i)
+			_, err = fmt.Fprintf(f, "x%02dn", i)
 			_ = f.Close()
 			if err != nil {
 				appendCh <- fmt.Errorf("write error: %v", err)
@@ -105,7 +105,7 @@ func CheckConcurrentAppendRead(base string) (retErr error) {
 				_ = f.Close()
 
 				if nread > 0 {
-					parts := bytes.Split(buf[:nread], []byte{'\n'})
+					parts := bytes.Split(buf[:nread], []byte{'n'})
 					for _, p := range parts {
 						if len(p) > 0 {
 							seen++
@@ -154,8 +154,8 @@ func summarizeSub(parent, name string, err error, dur time.Duration) {
 
 func ConcurrentAppendtest(base string) *autotests.AutoTestResult {
 	res := &autotests.AutoTestResult{
-		Name:   "Concurrent Append/Read Test",
-		Passed: false,
+		Name:  "Concurrent Append/Read Test",
+		State: autotests.TestFailed,
 	}
 
 	f, err := os.OpenFile(base, os.O_WRONLY|os.O_APPEND, 0644)
@@ -166,7 +166,7 @@ func ConcurrentAppendtest(base string) *autotests.AutoTestResult {
 	defer f.Close()
 
 	for i := range 5 {
-		_, err = fmt.Fprintf(f, "x%02d\n", i)
+		_, err = fmt.Fprintf(f, "x%02dn", i)
 		if err != nil {
 			res.Error = fmt.Errorf("write error: %v", err)
 			return res
@@ -174,14 +174,14 @@ func ConcurrentAppendtest(base string) *autotests.AutoTestResult {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	res.Passed = true
+	res.State = autotests.TestPassed
 	return res
 }
 
 func ConcurrentReadtest(base string) *autotests.AutoTestResult {
 	res := &autotests.AutoTestResult{
-		Name:   "Concurrent Read Test",
-		Passed: false,
+		Name:  "Concurrent Read Test",
+		State: autotests.TestFailed,
 	}
 	seen := 0
 	var last int64 = 0
@@ -216,7 +216,7 @@ func ConcurrentReadtest(base string) *autotests.AutoTestResult {
 				return res
 			}
 			if nread > 0 {
-				parts := bytes.Split(buf[:nread], []byte{'\n'})
+				parts := bytes.Split(buf[:nread], []byte{'n'})
 				for _, p := range parts {
 					if len(p) > 0 {
 						seen++
@@ -227,21 +227,21 @@ func ConcurrentReadtest(base string) *autotests.AutoTestResult {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	res.Passed = true
+	res.State = autotests.TestPassed
 	return res
 }
 
 func CheckConcurrentTest(base string) *autotests.AutoTestResult {
 	res := &autotests.AutoTestResult{
-		Name:   "Concurrent Append/Read Test",
-		Passed: false,
+		Name:  "Concurrent Append/Read Test",
+		State: autotests.TestFailed,
 	}
 
 	fpath := base + ".concurrent"
 
 	prep := autotests.PrepareFileForTest(fpath, (&autotests.FilePreparationOptions{}).RequestedBy("ConcurrentAppendRead"))
 	res.Children = append(res.Children, prep)
-	if !prep.Passed {
+	if prep.State == autotests.TestFailed {
 		return res
 	}
 
@@ -271,6 +271,6 @@ func CheckConcurrentTest(base string) *autotests.AutoTestResult {
 
 	res.Children = append(res.Children, <-appendResChan, <-readResChan)
 
-	res.Passed = true
+	res.State = autotests.TestPassed
 	return res
 }

@@ -1,7 +1,6 @@
 package autochecks
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -9,7 +8,7 @@ import (
 )
 
 func CheckOpenFlagsTest(base string) *autotests.AutoTestResult {
-	out := &autotests.AutoTestResult{Name: "CheckOpenFlagsTest", Passed: false}
+	out := &autotests.AutoTestResult{Name: "CheckOpenFlagsTest", State: autotests.TestFailed}
 	fbase := filepath.Join(base, "flags.dat")
 
 	defer func() {
@@ -19,55 +18,32 @@ func CheckOpenFlagsTest(base string) *autotests.AutoTestResult {
 	}()
 
 	bres := autotests.PrepareFileForTest(fbase+".baseline", autotests.NewFilePreparationOptions().WithData([]byte("BASE")).RequestedBy("Open Flags Baseline"))
-	out.Children = append(out.Children, bres)
-	if !bres.Passed {
-		out.Error = fmt.Errorf("baseline failed: %w", bres.Error)
+	if !out.AddChildResultAndContinue(bres) {
 		return out
 	}
 
-	runCheck := func(name, p string, check func(string) error, data []byte, prep bool) *autotests.AutoTestResult {
-		r := &autotests.AutoTestResult{Name: name, Passed: false}
-		if prep {
-			var pr *autotests.AutoTestResult
-			if data != nil {
-				pr = autotests.PrepareFileForTest(p, autotests.NewFilePreparationOptions().WithData(data).RequestedBy(name))
-			} else {
-				pr = autotests.PrepareFileForTest(p, nil)
-			}
-			r.Children = append(r.Children, pr)
-			if !pr.Passed {
-				r.Error = fmt.Errorf("%s prep failed: %w", name, pr.Error)
+	runCheck := func(name, p string, check func(string) *autotests.AutoTestResult, data []byte) *autotests.AutoTestResult {
+		r := &autotests.AutoTestResult{Name: name, State: autotests.TestFailed}
+		if data != nil {
+			pr := autotests.PrepareFileForTest(p, autotests.NewFilePreparationOptions().WithData(data).RequestedBy(name))
+			if !r.AddChildResultAndContinue(pr) {
 				return r
 			}
 		}
 
-		t := autotests.Timer(p, func(path string) *autotests.AutoTestResult {
-			tr := &autotests.AutoTestResult{Name: name, Passed: false}
-			if err := check(path); err != nil {
-				tr.Error = fmt.Errorf("%s failed: %w", name, err)
-				return tr
-			}
-			tr.Passed = true
-			return tr
-		})
-		r.Children = append(r.Children, t)
-		if !t.Passed {
-			r.Error = t.Error
-			_ = os.Remove(p)
+		t := autotests.Timer(p, check)
+		if !r.AddChildResultAndContinue(t) {
 			return r
 		}
-		_ = os.Remove(p)
-		r.Passed = true
+		r.State = autotests.TestPassed
 		return r
 	}
 
-	out.Children = append(out.Children, runCheck("O_RDONLY", fbase+".O_RDONLY", checkO_RDONLY_new, []byte("BASE"), true))
-	out.Children = append(out.Children, runCheck("O_WRONLY", fbase+".O_WRONLY", checkO_WRONLY_new, []byte("BASE"), true))
-	out.Children = append(out.Children, runCheck("O_APPEND", fbase+".append", checkO_APPEND_new, []byte("BASE"), true))
-	out.Children = append(out.Children, runCheck("O_TRUNC", fbase+".trunc", checkO_TRUNC_new, []byte("HELLO WORLD"), true))
-	_ = os.Remove(fbase + ".create")
-	out.Children = append(out.Children, runCheck("O_CREATE", fbase+".create", checkO_CREATE_new, nil, false))
-
-	out.Passed = true
+	out.Children = append(out.Children, runCheck("O_RDONLY", fbase+".O_RDONLY", checkO_RDONLY_new, []byte("BASE")))
+	out.Children = append(out.Children, runCheck("O_WRONLY", fbase+".O_WRONLY", checkO_WRONLY_new, []byte("BASE")))
+	out.Children = append(out.Children, runCheck("O_APPEND", fbase+".append", checkO_APPEND_new, []byte("BASE")))
+	out.Children = append(out.Children, runCheck("O_TRUNC", fbase+".trunc", checkO_TRUNC_new, []byte("HELLO WORLD")))
+	out.Children = append(out.Children, runCheck("O_CREATE", fbase+".create", checkO_CREATE_new, nil))
+	out.State = autotests.TestPassed
 	return out
 }
