@@ -36,6 +36,7 @@ func UnwrapResult(res *autotests.AutoTestResult, aggr *TestResultAggregate, dept
 		aggr.Failed++
 	case autotests.TestChildFailed:
 		fmt.Printf("%s[FAIL] %s: One or more child tests failed (took %s)\n", strings.Repeat("  ", depth), res.Name, res.Duration)
+		aggr.Skipped++
 	default:
 		panic("unknown test result state")
 	}
