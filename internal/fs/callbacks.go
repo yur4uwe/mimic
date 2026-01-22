@@ -42,11 +42,13 @@ func (fs *FuseFS) Getattr(p string, stat *fuselib.Stat_t, fh uint64) int {
 		*stat = *fi.stat
 
 		if fi.buffer != nil {
-			bufSize := fi.buffer.Size()
+			fi.buffer.MRLock()
+			bufSize := fi.buffer.Length()
 			bufBase := fi.buffer.BasePos()
 			if bufBase+bufSize > stat.Size {
 				stat.Size = bufBase + bufSize
 			}
+			fi.buffer.MRUnlock()
 		}
 
 		fs.logger.Logf("[Getattr] found handle path=%s fh=%d mode=%#o size=%d", norm, fh, stat.Mode, stat.Size)
@@ -72,9 +74,11 @@ func (fs *FuseFS) Getattr(p string, stat *fuselib.Stat_t, fh uint64) int {
 
 	buf, ok := fs.bufferCache.Get(norm)
 	if ok {
-		bufSize := buf.Size()
+		buf.MRLock()
+		bufSize := buf.Length()
 		bufBase := buf.BasePos()
 		stat.Size = max(stat.Size, bufBase+bufSize)
+		buf.MRUnlock()
 	}
 
 	fs.logger.Logf("[Getattr] path=%s has fh=%t mode=%#o size=%d", norm, fh^(^uint64(0)) == 0, file.Mode(), file.Size())
@@ -105,7 +109,7 @@ func (fs *FuseFS) Open(path string, oflags int) (int, uint64) {
 
 	handle := fs.NewHandle(path, casters.FileInfoCast(fi), uint32(flags))
 
-	fs.logger.Logf("[Open] path=%s flags=%d handle=%d", path, flags, handle)
+	fs.logger.Logf("[Open] path=%s flags=%s oflags=%d handle=%d", path, flags, oflags, handle)
 
 	return 0, handle
 }

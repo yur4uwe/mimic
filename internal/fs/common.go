@@ -1,6 +1,7 @@
 package fs
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -47,9 +48,20 @@ func (fh *FileHandle) MUnlock() {
 	fh.mu.Unlock()
 }
 
+func (fh *FileHandle) Size() int64 {
+	if fh.buffer == nil {
+		fmt.Printf("[File Size] buffer is null returning stat.Size = %d\n", fh.stat.Size)
+		return fh.stat.Size
+	}
+
+	fh.buffer.MRLock()
+	defer fh.buffer.MRUnlock()
+	// I don't know if this would work if file is downsized
+	fmt.Printf("[File Size] buffer %p is present for %s returning max(buffer.Length()+buffer.BasePos(), stat.Size) = max(%d+%d, %d)\n", fh.buffer, fh.path, fh.buffer.Length(), fh.buffer.BasePos(), fh.stat.Size)
+	return max(fh.buffer.Length()+fh.buffer.BasePos(), fh.stat.Size)
+}
+
 func (fh *FileHandle) AddToBuffer(offset int64, data []byte) {
-	fh.mu.Lock()
-	defer fh.mu.Unlock()
 	if len(data) == 0 {
 		return
 	}
@@ -67,8 +79,6 @@ func (fh *FileHandle) AddToBuffer(offset int64, data []byte) {
 // without marking the buffer as dirty and without overwriting pages that are
 // already present.
 func (fh *FileHandle) AddRemoteToBuffer(offset int64, data []byte) {
-	fh.mu.Lock()
-	defer fh.mu.Unlock()
 	if len(data) == 0 {
 		return
 	}
@@ -127,6 +137,7 @@ func (fs *FuseFS) NewHandle(path string, stat *fuselib.Stat_t, oflags uint32) ui
 	fh := NewFilehandle(path, flags.OpenFlag(oflags), stat)
 
 	fb := fs.bufferCache.GetOrCreate(path)
+	fs.logger.Logf("[NewHandle] created handle=%d for path=%s with buffer %p", file_handle, path, fb)
 	fb.IncHandle()
 	fh.buffer = fb
 

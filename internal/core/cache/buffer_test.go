@@ -141,8 +141,8 @@ func TestFileBuffer_ClearAndBounds(t *testing.T) {
 
 	// Clear
 	fb.Clear()
-	if fb.Size() != 0 {
-		t.Fatalf("after Clear size: want 0 got %d", fb.Size())
+	if fb.Length() != 0 {
+		t.Fatalf("after Clear size: want 0 got %d", fb.Length())
 	}
 	if fb.IsValidAt(0) {
 		t.Fatalf("after Clear expected no valid bits")

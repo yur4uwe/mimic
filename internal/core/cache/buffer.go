@@ -26,9 +26,23 @@ type FileBuffer struct {
 	HandleCount int
 }
 
-func (fb *FileBuffer) BasePos() int64 {
+func (fb *FileBuffer) MLock() {
+	fb.mu.Lock()
+}
+
+func (fb *FileBuffer) MUnlock() {
+	fb.mu.Unlock()
+}
+
+func (fb *FileBuffer) MRLock() {
 	fb.mu.RLock()
-	defer fb.mu.RUnlock()
+}
+
+func (fb *FileBuffer) MRUnlock() {
+	fb.mu.RUnlock()
+}
+
+func (fb *FileBuffer) BasePos() int64 {
 	return fb.Base
 }
 
@@ -228,9 +242,7 @@ func (fb *FileBuffer) IsValidAt(i int64) bool {
 	return fb.Mask.IsDirty(i - fb.Base)
 }
 
-func (fb *FileBuffer) Size() int64 {
-	fb.mu.RLock()
-	defer fb.mu.RUnlock()
+func (fb *FileBuffer) Length() int64 {
 	return int64(len(fb.Data))
 }
 

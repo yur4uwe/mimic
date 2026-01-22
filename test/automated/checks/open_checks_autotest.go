@@ -82,15 +82,19 @@ func checkO_WRONLY_new(fpath string) *autotests.AutoTestResult {
 func checkO_APPEND_new(fpath string) *autotests.AutoTestResult {
 	res := &autotests.AutoTestResult{Name: "checkO_APPEND_new", State: autotests.TestFailed}
 
-	f, err := os.OpenFile(fpath, os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := os.OpenFile(fpath, os.O_RDWR|os.O_APPEND, 0644)
 	if err != nil {
 		res.Error = fmt.Errorf("open O_APPEND: %w", err)
 		return res
 	}
 	defer f.Close()
 
+	var buf []byte = make([]byte, 4)
+	n, _ := f.Read(buf)
+	fmt.Printf("bytes read: %d buf: %v\n", n, buf)
+
 	// write should append
-	n, err := f.Write([]byte("A"))
+	n, err = f.Write([]byte("A"))
 	if err != nil || n != 1 {
 		res.Error = fmt.Errorf("write failed on O_APPEND: %w", err)
 		return res

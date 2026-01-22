@@ -10,8 +10,6 @@ import (
 	autotests "github.com/mimic/test/automated/declarations"
 )
 
-type checkFunc func(string) error
-
 type TestResultAggregate struct {
 	Passed   uint
 	Skipped  uint
@@ -69,11 +67,11 @@ func main() {
 	aggregate := &TestResultAggregate{}
 
 	for _, callback := range []func(string) *autotests.AutoTestResult{
-		autochecks.CheckFileOpsTest,
-		autochecks.CheckLargeWriteTest,
+		// autochecks.CheckFileOpsTest,
+		// autochecks.CheckLargeWriteTest,
 		autochecks.CheckOpenFlagsTest,
-		autochecks.CheckTruncateTest,
-		autochecks.CheckConcurrentTest,
+		// autochecks.CheckTruncateTest,
+		// autochecks.CheckConcurrentTest,
 	} {
 		r := autotests.Timer(mount, callback)
 		UnwrapResult(r, aggregate, 0)

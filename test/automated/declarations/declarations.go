@@ -92,6 +92,7 @@ func PrepareFileForTest(path string, optsArr ...*FilePreparationOptions) *AutoTe
 		res.Duration = time.Since(start)
 	}()
 
+	fmt.Printf("Preparing file %s with data: %s\n", path, opts.Data)
 	if err := os.WriteFile(path, opts.Data, 0644); err != nil {
 		res.Error = err
 		_ = os.Remove(path)

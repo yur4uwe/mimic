@@ -69,6 +69,9 @@ func (fs *FuseFS) Write(path string, buffer []byte, offset int64, file_handle ui
 		return -EACCES
 	}
 
+	file.MLock()
+	defer file.MUnlock()
+
 	reqPageOffset, reqPageLen := file.PageAlignedRange(offset, int64(len(buffer)))
 	if (reqPageOffset != offset || reqPageLen != int64(len(buffer))) && !file.buffer.DirtyRange(reqPageOffset, reqPageLen) {
 		fs.logger.Logf("[Write] adjusted write range for %s from offset=%d len=%d to offset=%d len=%d", path, offset, len(buffer), reqPageOffset, reqPageLen)
@@ -86,14 +89,19 @@ func (fs *FuseFS) Write(path string, buffer []byte, offset int64, file_handle ui
 		}
 	}
 
+	if file.flags.Append() {
+		fs.logger.Logf("[Write] append mode for %s: adjusting offset from %d to %d with flags: %s", path, offset, file.Size(), file.flags.String())
+		offset = file.Size()
+	}
+
 	file.AddToBuffer(offset, buffer)
 	end := offset + int64(len(buffer))
-	if end > file.stat.Size {
+	if end > file.Size() {
 		file.stat.Size = end
 	}
 
-	// buf := file.CopyBuffer()
-	// fs.logger.Logf("[Write] buffer len=%d offset=%d, after write: path=%s base=%d len=%d dirty=%v", len(buffer), offset, path, buf.Base, len(buf.Data), file.IsDirty())
+	buf := file.CopyBuffer()
+	fs.logger.Logf("[Write] buffer len=%d offset=%d, after write: path=%s base=%d len=%d dirty=%v", len(buffer), offset, path, buf.Base, len(buf.Data), file.IsDirty())
 
 	return len(buffer)
 }
@@ -117,21 +125,6 @@ func (fs *FuseFS) Create(p string, flags int, mode uint32) (int, uint64) {
 	stat := casters.EmptyFileStat(isHidden)
 
 	h := fs.NewHandle(p, stat, uint32(flags))
-
-	go func(h uint64, p string) {
-		fi, err := fs.client.Stat(p)
-		if err != nil {
-			return
-		}
-		fh, ok := fs.GetHandle(h)
-		if !ok {
-			return
-		}
-		fh.MLock()
-		fh.stat = casters.FileInfoCast(fi)
-		fh.remoteSize = fi.Size()
-		fh.MUnlock()
-	}(h, p)
 
 	fs.logger.Logf("[Create] returning handle=%d path=%s flags=%#o mode=%#o", h, p, flags, mode)
 	return 0, h
@@ -270,8 +263,9 @@ func (fs *FuseFS) Read(path string, buffer []byte, offset int64, file_handle uin
 		remoteBuf, err := fs.client.ReadRange(fh.path, reqPageStart, reqPageLen)
 		if err == nil {
 			if len(remoteBuf) > 0 {
-				// fs.logger.Logf("[Read] fetched remote data to fill buffer gap for %s offset=%d(pre-align=%d) len=%d(pre-align=%d)", path, reqPageStart, reqStart, reqPageLen, actualLen)
+				fh.MLock()
 				fh.AddRemoteToBuffer(reqPageStart, remoteBuf)
+				fh.MUnlock()
 			}
 			goto merge
 		}
